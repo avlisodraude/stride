@@ -2,7 +2,17 @@
   "name": "@alosha/stride",
   "version": "0.1.0",
   "description": "Parse GPX files, compute running metrics, and render Chart.js dashboards — zero config.",
-  "keywords": ["running", "gpx", "analytics", "chartjs", "fitness", "strava", "garmin", "pace", "training"],
+  "keywords": [
+    "running",
+    "gpx",
+    "analytics",
+    "chartjs",
+    "fitness",
+    "strava",
+    "garmin",
+    "pace",
+    "training"
+  ],
   "homepage": "https://stride.alosha.dev",
   "bugs": {
     "url": "https://github.com/avlisodraude/stride/issues"
@@ -24,7 +34,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "stride": "./dist/cli.js"
+    "stride": "dist/cli.js"
   },
   "files": [
     "dist",
