@@ -167,8 +167,10 @@ export function analyze(activity: Activity, maxHR = 190): ActivityStats {
 
 export function formatPace(secPerKm: number, units: 'metric' | 'imperial' = 'metric'): string {
   const adjusted = units === 'imperial' ? secPerKm * 1.60934 : secPerKm
-  const min = Math.floor(adjusted / 60)
-  const sec = Math.round(adjusted % 60)
+  // Round to whole seconds first, then split, so 479.6s → 8:00 (not 7:60).
+  const totalSec = Math.round(adjusted)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
   const unit = units === 'imperial' ? '/mi' : '/km'
   return `${min}:${sec.toString().padStart(2, '0')}${unit}`
 }
