@@ -1,17 +1,23 @@
 {
   "name": "@alosha/stride",
-  "version": "0.1.1",
-  "description": "Parse GPX files, compute running metrics, and render Chart.js dashboards — zero config.",
+  "version": "0.1.2",
+  "description": "Parse GPX files and compute running metrics — pace, HR zones, splits, and Chart.js dashboards. Zero config.",
   "keywords": [
-    "running",
     "gpx",
-    "analytics",
-    "chartjs",
-    "fitness",
+    "gpx-parser",
+    "running",
     "strava",
     "garmin",
+    "activity",
+    "heart-rate",
+    "heart-rate-zones",
     "pace",
-    "training"
+    "splits",
+    "chartjs",
+    "chart",
+    "activity-analysis",
+    "fitness",
+    "cli"
   ],
   "homepage": "https://stride.alosha.dev",
   "bugs": {
