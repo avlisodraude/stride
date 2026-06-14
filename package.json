@@ -1,6 +1,6 @@
 {
   "name": "@alosha/stride",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Parse GPX files, compute running metrics, and render Chart.js dashboards — zero config.",
   "keywords": [
     "running",
