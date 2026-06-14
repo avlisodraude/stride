@@ -6,6 +6,11 @@ Parse GPX files, compute running metrics, and render Chart.js dashboards — zer
 [![npm downloads](https://img.shields.io/npm/dm/@alosha/stride)](https://www.npmjs.com/package/@alosha/stride)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+- **GPX in, insights out** — parses a file path or raw XML, including Garmin heart-rate and cadence extensions.
+- **Every running metric you want** — pace, splits, HR zones (Z1–Z5), elevation, cadence, moving vs. elapsed time.
+- **Charts with zero boilerplate** — 5 ready-made Chart.js configs (pace, elevation, heart rate, HR zones, splits).
+- **CLI and library** — `npx stride analyze run.gpx`, metric or imperial, no config required.
+
 ## Install
 
 ```bash
