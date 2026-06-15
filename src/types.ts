@@ -21,7 +21,7 @@ export interface Activity {
   startTime?: Date
   points: TrackPoint[]
   /** Source file format */
-  format: 'gpx'
+  format: 'gpx' | 'fit' | 'tcx'
 }
 
 // ---------------------------------------------------------------------------

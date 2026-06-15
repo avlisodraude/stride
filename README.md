@@ -1,15 +1,31 @@
 # @alosha/stride
 
-Parse GPX files, compute running metrics, and render Chart.js dashboards — zero config.
+Parse GPX, TCX and FIT files, compute running metrics, and render Chart.js dashboards — zero config.
 
 [![npm version](https://img.shields.io/npm/v/@alosha/stride)](https://www.npmjs.com/package/@alosha/stride)
 [![npm downloads](https://img.shields.io/npm/dm/@alosha/stride)](https://www.npmjs.com/package/@alosha/stride)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-- **GPX in, insights out** — parses a file path or raw XML, including Garmin heart-rate and cadence extensions.
+- **GPX, TCX & FIT in, insights out** — parses GPX and TCX XML (file path or raw string) plus binary FIT files from Garmin, Strava, Coros, Wahoo and more. Format is auto-detected; the same `analyze()` and charts work for all three.
 - **Every running metric you want** — pace, splits, HR zones (Z1–Z5), elevation, cadence, moving vs. elapsed time.
 - **Charts with zero boilerplate** — 5 ready-made Chart.js configs (pace, elevation, heart rate, HR zones, splits).
 - **CLI and library** — `npx stride analyze run.gpx`, metric or imperial, no config required.
+
+## Supported formats
+
+Most running libraries handle GPX only. Stride reads the three formats your
+devices and platforms actually export, and normalises them into one shape — so
+`analyze()` and every chart config work identically regardless of source.
+
+| Format | Extension | Input types | Typical sources |
+|---|---|---|---|
+| **GPX** | `.gpx` | file path, raw XML string | Strava, Apple Health/Watch routes, Komoot, most apps |
+| **TCX** | `.tcx` | file path, raw XML string | Garmin Connect, Strava, Wahoo, Zwift |
+| **FIT** | `.fit` | file path, `Uint8Array`, `ArrayBuffer` | Garmin, Coros, Wahoo, Suunto, Polar (native device files) |
+
+The format is **auto-detected** — you call `parse()` and never branch on file
+type. All three surface the same fields where the source provides them: GPS
+track, elevation, heart rate, cadence and timestamps.
 
 ## Install
 
@@ -23,8 +39,8 @@ npm install @alosha/stride
 import { parse, analyze, paceChartConfig, splitsChartConfig } from '@alosha/stride'
 import { Chart } from 'chart.js/auto'
 
-// Parse a GPX file
-const activity = parse('./my-run.gpx')
+// Parse a GPX, TCX or FIT file — the format is detected automatically
+const activity = parse('./my-run.gpx')   // or './my-run.tcx', './my-run.fit'
 
 // Compute all running metrics
 const stats = analyze(activity)
@@ -39,7 +55,9 @@ new Chart(document.getElementById('splits'), splitsChartConfig(stats))
 
 ```bash
 npx stride analyze my-run.gpx
-npx stride analyze my-run.gpx --imperial
+npx stride analyze my-run.tcx            # TCX and FIT work too — auto-detected
+npx stride analyze my-run.fit
+npx stride analyze my-run.fit --imperial
 ```
 
 Output:
@@ -64,14 +82,55 @@ Output:
 
 ## API
 
-### `parse(input: string): Activity`
+### `parse(input: string | Uint8Array | ArrayBuffer): Activity`
 
-Parse a GPX file path or raw XML string into an `Activity` object.
+Parse an activity file into a normalised `Activity` object. The format is
+auto-detected, so the returned shape is identical for GPX, TCX and FIT.
 
 ```ts
-const activity = parse('./run.gpx')        // from file
-const activity = parse(gpxXmlString)       // from string
+// GPX / TCX — file path or raw XML string
+const activity = parse('./run.gpx')
+const activity = parse('./run.tcx')
+const activity = parse(xmlString)
+
+// FIT — file path (Node) or raw bytes (browser / streamed)
+const activity = parse('./run.fit')
+const activity = parse(new Uint8Array(arrayBuffer))
 ```
+
+| Input | Detected as |
+|---|---|
+| String/contents containing `<gpx` | GPX |
+| String/contents containing `<TrainingCenterDatabase` | TCX |
+| File path to a `.FIT` file, or `Uint8Array` / `ArrayBuffer` bytes | FIT |
+
+In the browser, file paths aren't available — read the file with a
+`FileReader` and pass the result to `parse()` (a string for GPX/TCX via
+`readAsText`, or a `Uint8Array` for FIT via `readAsArrayBuffer`).
+
+#### Per-format details
+
+Every format produces the same `Activity` object, but each has a few quirks
+worth knowing:
+
+**GPX** (`.gpx`) — reads `<trkpt>` lat/lon, `<ele>`, `<time>`, and the Garmin
+`TrackPointExtension` for heart rate and cadence (`gpxtpx:`/`ns3:` namespaces).
+Cadence is doubled from per-foot RPM to steps/min.
+
+**TCX** (`.tcx`) — Garmin Training Center XML. All `Activity → Lap → Track →
+Trackpoint` elements are flattened into one continuous point stream, so
+multi-lap files just work. Reads `Position` (LatitudeDegrees/LongitudeDegrees),
+`AltitudeMeters`, `HeartRateBpm`, and the activity-extension `RunCadence`
+(namespaced or bare), doubled to steps/min. The `Sport` attribute becomes
+`activity.type`. Trackpoints without a `Position` (indoor/paused) are skipped.
+
+**FIT** (`.fit`) — binary device files, decoded with
+[`@garmin/fitsdk`](https://www.npmjs.com/package/@garmin/fitsdk). Positions are
+converted from semicircles to degrees (`× 180 / 2³¹`), the higher-resolution
+`enhancedAltitude` is preferred over `altitude` when present, and cadence
+(plus `fractionalCadence`) is normalised to steps/min. Sport and start time come
+from the session/sport messages. Records without GPS are skipped. Pass FIT as a
+file path (Node) or as `Uint8Array`/`ArrayBuffer` bytes (browser).
 
 ### `analyze(activity: Activity, maxHR?: number): ActivityStats`
 

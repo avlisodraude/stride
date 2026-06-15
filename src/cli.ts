@@ -40,11 +40,11 @@ function printStats(filePath: string, units: 'metric' | 'imperial' = 'metric') {
 
 function help() {
   console.log(`
-@alosha/stride — GPX running analytics
+@alosha/stride — GPX, TCX & FIT running analytics
 
 Usage:
-  stride analyze <file.gpx>           Analyze a GPX file (metric)
-  stride analyze <file.gpx> --imperial  Use imperial units
+  stride analyze <file.gpx|file.tcx|file.fit>            Analyze a run (metric)
+  stride analyze <file.gpx|file.tcx|file.fit> --imperial  Use imperial units
 
 Built by Alosha → https://stride.alosha.dev
 `)
@@ -52,7 +52,7 @@ Built by Alosha → https://stride.alosha.dev
 
 if (command === 'analyze') {
   if (!filePath) {
-    console.error('Error: provide a GPX file path.\n  stride analyze run.gpx')
+    console.error('Error: provide a GPX, TCX or FIT file path.\n  stride analyze run.gpx')
     process.exit(1)
   }
   const imperial = process.argv.includes('--imperial')
