@@ -4,6 +4,7 @@ Parse GPX, TCX and FIT files, compute running metrics, and render Chart.js dashb
 
 [![npm version](https://img.shields.io/npm/v/@alosha/stride)](https://www.npmjs.com/package/@alosha/stride)
 [![npm downloads](https://img.shields.io/npm/dm/@alosha/stride)](https://www.npmjs.com/package/@alosha/stride)
+[![Types included](https://img.shields.io/badge/types-included-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 - **GPX, TCX & FIT in, insights out** — parses GPX and TCX XML (file path or raw string) plus binary FIT files from Garmin, Strava, Coros, Wahoo and more. Format is auto-detected; the same `analyze()` and charts work for all three.
@@ -79,6 +80,49 @@ Output:
     km  2  5:03/km  ↑8m   HR 156bpm
     ...
 ```
+
+## Production recipes
+
+Real things you'd build with run data — copy, paste, ship.
+
+### Turn a Garmin .FIT upload into a pace chart in the browser
+
+**The problem:** users export runs from Garmin, Strava, Coros and Wahoo in different formats — and FIT is binary, not text.
+
+```ts
+import { parse, analyze, paceChartConfig } from '@alosha/stride'
+import { Chart } from 'chart.js/auto'
+
+// A user drops a .fit / .gpx / .tcx export onto your page.
+async function renderUpload(file: File, canvas: HTMLCanvasElement) {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const activity = parse(bytes)     // format auto-detected: GPX / TCX / FIT
+  const stats = analyze(activity)   // distance, pace, HR zones, splits
+
+  new Chart(canvas, paceChartConfig(activity, stats))
+  return stats
+}
+```
+
+**Why it works:** `parse()` auto-detects the format and returns one normalised `Activity`, so the same `analyze()` and chart configs work no matter which watch produced the file — no per-vendor branching in your upload handler.
+
+### Build a heart-rate zone breakdown without writing the maths
+
+**The problem:** time-in-zone is a core training metric, but computing Z1–Z5 from a raw HR stream by hand is fiddly and error-prone.
+
+```ts
+import { parse, analyze, hrZonesChartConfig } from '@alosha/stride'
+import { Chart } from 'chart.js/auto'
+
+const activity = parse('./tempo-run.tcx')
+const stats = analyze(activity, 188)   // pass the athlete's max HR
+
+// Seconds spent in each zone, ready for a doughnut chart.
+console.log(stats.hrZones)             // { z1, z2, z3, z4, z5 } | null
+new Chart(canvas, hrZonesChartConfig(stats))
+```
+
+**Why it works:** `analyze()` computes Z1–Z5 time-in-zone from the HR stream against the max HR you pass and returns a ready Chart.js config — you get a training-quality breakdown without ever touching the zone formula.
 
 ## API
 
@@ -190,8 +234,15 @@ formatDuration(3092)         // "51:32"
 | `avgCadence` | `number \| null` | Average cadence in steps/min |
 | `splits` | `Split[]` | Per-km splits |
 
+## Support & custom work
+
+`@alosha/stride` is free and MIT-licensed, and always will be. When you need more than the open-source library, there's a paid path backed by the maintainer — not a ticket queue:
+
+- **Priority support** — a direct line to the person who wrote it, with prioritised fixes.
+- **Custom work** — bespoke chart types or running metrics, and help integrating Stride into your app or platform.
+
+Get in touch at [alosha.dev/support](https://alosha.dev/support).
+
 ---
 
-Want hosted activity history, training plans, and team dashboards? → [stride.alosha.dev](https://stride.alosha.dev)
-
-Built by [Alosha](https://alosha.dev)
+Docs & live demo: [stride.alosha.dev](https://stride.alosha.dev) · Built by [Alosha](https://alosha.dev)
