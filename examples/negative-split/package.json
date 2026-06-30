@@ -1,0 +1,13 @@
+{
+  "name": "negative-split-example",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "stride recipe: detect a negative split (or a late-race fade) from per-km splits",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@alosha/stride": "^0.2.1"
+  }
+}
