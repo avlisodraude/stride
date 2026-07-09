@@ -90,3 +90,21 @@ describe('§5 elevation gain/loss — hysteresis filter', () => {
     expect(stats.elevationLossM).toBe(3)
   })
 })
+
+describe('§4 split boundaries — carry overshoot forward', () => {
+  test('§4.3 worked example — exact km marks, no boundary drift', () => {
+    // First segment overshoots the 1km mark by 400m in one step (1400m),
+    // which is exactly what triggers the old drift bug.
+    const points = [
+      pt({ lon: 0, timestamp: tsAt(0) }),
+      pt({ lon: 0.0125905, timestamp: tsAt(420) }),
+      pt({ lon: 0.0215837, timestamp: tsAt(700) }),
+      pt({ lon: 0.0305769, timestamp: tsAt(1000) }),
+    ]
+    const stats = analyze({ points, format: 'gpx' })
+    const paces = stats.splits.map(s => s.paceSecPerKm)
+    // Corrected: km1=300, km2=288, km3=292 (each over a true 1000m), vs the
+    // old drifting-boundary output of [300, 280, 300] over 1400/1000/1000m.
+    expect(paces).toEqual([300, 288, 292])
+  })
+})

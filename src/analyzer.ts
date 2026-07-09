@@ -103,6 +103,74 @@ function elevationHysteresis(
 }
 
 // ---------------------------------------------------------------------------
+// Cumulative-series helpers (metrics-spec.md §2.3 / §4.2)
+// ---------------------------------------------------------------------------
+
+// Elapsed time at cumulative distance `x`, linearly interpolated within the
+// segment that contains it. `cumDist`/`cumTime` must be non-decreasing and
+// the same length, with index 0 = the activity's start (0, 0).
+function timeAt(x: number, cumDist: number[], cumTime: number[]): number {
+  const n = cumDist.length
+  if (x <= cumDist[0]) return cumTime[0]
+  if (x >= cumDist[n - 1]) return cumTime[n - 1]
+
+  let lo = 1
+  let hi = n - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (cumDist[mid] < x) lo = mid + 1
+    else hi = mid
+  }
+  const segLen = cumDist[lo] - cumDist[lo - 1]
+  const f = segLen > 0 ? (x - cumDist[lo - 1]) / segLen : 0
+  return cumTime[lo - 1] + f * (cumTime[lo] - cumTime[lo - 1])
+}
+
+// Splits at exact 1000m marks, carrying any overshoot forward instead of
+// resetting at the emitting segment's own (drifting) distance. Only full
+// 1000m splits — the trailing partial is handled separately (metrics-spec.md
+// §3). Per-split elevation gain and average HR are attributed to whichever
+// split contains each segment's *ending* point (same convention as HR zones,
+// §1.2), not interpolated — the spec calls exact interpolation there
+// unnecessary precision.
+function buildFullSplits(
+  pts: { heartRate?: number }[],
+  cumDist: number[],
+  cumTime: number[],
+  gainAtPoint: number[]
+): Split[] {
+  const total = cumDist[cumDist.length - 1]
+  const splits: Split[] = []
+
+  let mark = 0
+  let km = 1
+  while (mark + 1000 <= total) {
+    const t0 = timeAt(mark, cumDist, cumTime)
+    const t1 = timeAt(mark + 1000, cumDist, cumTime)
+    splits.push({ km: km++, paceSecPerKm: Math.round(t1 - t0), elevationGainM: 0 })
+    mark += 1000
+  }
+
+  const numSplits = splits.length
+  const hrSum = new Array(numSplits).fill(0)
+  const hrCount = new Array(numSplits).fill(0)
+  const elevSum = new Array(numSplits).fill(0)
+  for (let i = 1; i < cumDist.length; i++) {
+    const idx = Math.ceil(cumDist[i] / 1000) - 1
+    if (idx < 0 || idx >= numSplits) continue
+    elevSum[idx] += gainAtPoint[i]
+    const hr = pts[i].heartRate
+    if (hr != null) { hrSum[idx] += hr; hrCount[idx]++ }
+  }
+  for (let k = 0; k < numSplits; k++) {
+    splits[k].elevationGainM = Math.round(elevSum[k])
+    if (hrCount[k] > 0) splits[k].avgHeartRate = Math.round(hrSum[k] / hrCount[k])
+  }
+
+  return splits
+}
+
+// ---------------------------------------------------------------------------
 // Main analyzer
 // ---------------------------------------------------------------------------
 
@@ -118,7 +186,6 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
     }
   }
 
-  let distanceM = 0
   let movingTimeSec = 0
 
   const { gainAtPoint, totalGainM: elevationGainM, totalLossM: elevationLossM } =
@@ -126,17 +193,11 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
 
   const PAUSE_THRESHOLD_MPS = 0.3 // below this speed = paused
 
-  // Per-km split tracking
-  const splits: Split[] = []
-  let splitDistM = 0
-  let splitTimeSec = 0
-  let splitElevGain = 0
-  let splitHrSum = 0
-  let splitHrCount = 0
-  let splitKm = 1
-
-  // Best 1km pace window
-  let bestKmPace: number | null = null
+  // Cumulative distance/elapsed-time series (metrics-spec.md §2.3), used to
+  // build splits at exact km marks via interpolation instead of the
+  // segment's own (drifting) distance.
+  const cumDist: number[] = [0]
+  const cumTime: number[] = [0]
 
   // HR
   const hrValues = pts.map(p => p.heartRate).filter((h): h is number => h != null)
@@ -170,8 +231,10 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
     const speedMps = segDist / segTimeSec
     const isMoving = speedMps > PAUSE_THRESHOLD_MPS
 
-    distanceM += segDist
     if (isMoving) movingTimeSec += segTimeSec
+
+    cumDist.push(cumDist[i - 1] + segDist)
+    cumTime.push(cumTime[i - 1] + segTimeSec)
 
     // HR zone weight for this segment (attributed to curr, the ending sample)
     let zoneWeightSec: number
@@ -184,29 +247,16 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
       zoneWeightSec = rawDt > 0 ? rawDt : 0
     }
     hrZoneSegments.push({ heartRate: curr.heartRate, weightSec: zoneWeightSec })
+  }
 
-    // Split accumulation
-    splitDistM += segDist
-    splitTimeSec += segTimeSec
-    splitElevGain += gainAtPoint[i]
-    if (curr.heartRate != null) {
-      splitHrSum += curr.heartRate
-      splitHrCount++
-    }
+  const distanceM = cumDist[cumDist.length - 1]
+  const splits = buildFullSplits(pts, cumDist, cumTime, gainAtPoint)
 
-    // Emit split every 1km
-    if (splitDistM >= 1000) {
-      const pace = splitTimeSec / (splitDistM / 1000)
-      splits.push({
-        km: splitKm++,
-        paceSecPerKm: Math.round(pace),
-        elevationGainM: Math.round(splitElevGain),
-        ...(splitHrCount > 0 ? { avgHeartRate: Math.round(splitHrSum / splitHrCount) } : {}),
-      })
-      if (bestKmPace === null || pace < bestKmPace) bestKmPace = pace
-      splitDistM = 0; splitTimeSec = 0; splitElevGain = 0
-      splitHrSum = 0; splitHrCount = 0
-    }
+  // Best 1km pace: fastest of the full splits above (metrics-spec.md §4
+  // fixes the split boundaries; §2 replaces this with a true rolling window).
+  let bestKmPace: number | null = null
+  for (const s of splits) {
+    if (bestKmPace === null || s.paceSecPerKm < bestKmPace) bestKmPace = s.paceSecPerKm
   }
 
   const elapsedTimeSec =
