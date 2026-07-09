@@ -1,6 +1,6 @@
 export { parse } from './parser.js'
 export { analyze, formatPace, formatDistance, formatDuration } from './analyzer.js'
-export type { AnalyzeOptions } from './analyzer.js'
+export type { AnalyzeOptions, HrZoneModel } from './analyzer.js'
 export {
   paceChartConfig,
   elevationChartConfig,

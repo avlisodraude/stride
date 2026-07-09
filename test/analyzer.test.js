@@ -55,6 +55,106 @@ describe('§1 HR zones — time-weighted', () => {
   })
 })
 
+describe('configurable HR zone model (zoneModel) and pause threshold (pauseThresholdMps)', () => {
+  test('defaults reproduce the implicit hrmax/60-70-80-90/0.3 behaviour exactly', () => {
+    const points = [
+      pt({ lat: 52, lon: 4, timestamp: tsAt(0), heartRate: 140 }),
+      pt({ lat: 52, lon: 4, timestamp: tsAt(8), heartRate: 145 }),
+      pt({ lat: 52, lon: 4, timestamp: tsAt(9), heartRate: 185 }),
+    ]
+    const implicit = analyze({ points, format: 'gpx' }, { maxHR: 190 })
+    const explicit = analyze({ points, format: 'gpx' }, {
+      maxHR: 190,
+      zoneModel: { type: 'hrmax', boundaries: [0.6, 0.7, 0.8, 0.9] },
+      pauseThresholdMps: 0.3,
+    })
+    expect(explicit).toEqual(implicit)
+  })
+
+  // Karvonen / heart-rate-reserve worked example. maxHR=190, restingHR=50 ->
+  // reserve = 140. Reuses the §1.6 fixture (same raw HR samples) so the
+  // *only* thing that changes is the zone anchor:
+  //   pct = (hr - restingHR) / (maxHR - restingHR) = (hr - 50) / 140
+  //   140 -> (140-50)/140 = 90/140  = 0.6429 -> z2 (was z3 under %HRmax: 140/190=0.7368)
+  //   145 -> (145-50)/140 = 95/140  = 0.6786 -> z2 (was z3: 145/190=0.7632)
+  //   185 -> (185-50)/140 = 135/140 = 0.9643 -> z5 (185/190=0.9737 -> also z5)
+  //   186 -> (186-50)/140 = 136/140 = 0.9714 -> z5
+  //   184 -> (184-50)/140 = 134/140 = 0.9571 -> z5
+  //   142 -> (142-50)/140 = 92/140  = 0.6571 -> z2 (was z3: 142/190=0.7474)
+  // Segment durations are unchanged from §1.6 (ending-sample attribution):
+  //   p0->p1 8s -> z2 (145), p1->p2 1s -> z5 (185), p2->p3 1s -> z5 (186),
+  //   p3->p4 1s -> z5 (184), p4->p5 8s -> z2 (142)
+  // so z2 = 8+8 = 16, z5 = 1+1+1 = 3 -- same totals as §1.6's z3/z5 split,
+  // but relabelled into z2 because the reserve-based pct is lower than the
+  // %HRmax pct for every sample here.
+  test('Karvonen reserve model reclassifies zones relative to %HRmax for identical raw data', () => {
+    const points = [
+      pt({ lat: 52, lon: 4, timestamp: tsAt(0), heartRate: 140 }),
+      pt({ lat: 52, lon: 4, timestamp: tsAt(8), heartRate: 145 }),
+      pt({ lat: 52, lon: 4, timestamp: tsAt(9), heartRate: 185 }),
+      pt({ lat: 52, lon: 4, timestamp: tsAt(10), heartRate: 186 }),
+      pt({ lat: 52, lon: 4, timestamp: tsAt(11), heartRate: 184 }),
+      pt({ lat: 52, lon: 4, timestamp: tsAt(19), heartRate: 142 }),
+    ]
+    const stats = analyze({ points, format: 'gpx' }, {
+      maxHR: 190,
+      zoneModel: { type: 'reserve', restingHR: 50 },
+    })
+    expect(stats.hrZones).toEqual({ z1: 0, z2: 16, z3: 0, z4: 0, z5: 3 })
+    const total = stats.hrZones.z1 + stats.hrZones.z2 + stats.hrZones.z3 + stats.hrZones.z4 + stats.hrZones.z5
+    expect(total).toBe(19)
+  })
+
+  test('custom boundaries reclassify a zone relative to the default 60/70/80/90 bands', () => {
+    // maxHR=200, heartRate=130 -> pct = 0.65: under default boundaries that
+    // is z2 (0.6 <= 0.65 < 0.7); raising the first boundary to 0.7 pushes
+    // the same sample down into z1 (0.65 < 0.7).
+    const points = [
+      pt({ timestamp: tsAt(0), heartRate: 120 }),
+      pt({ timestamp: tsAt(10), heartRate: 130 }),
+    ]
+    const defaultStats = analyze({ points, format: 'gpx' }, { maxHR: 200 })
+    expect(defaultStats.hrZones.z2).toBe(10)
+
+    const customStats = analyze({ points, format: 'gpx' }, {
+      maxHR: 200,
+      zoneModel: { type: 'hrmax', boundaries: [0.7, 0.75, 0.85, 0.95] },
+    })
+    expect(customStats.hrZones.z1).toBe(10)
+  })
+
+  test('invalid boundaries throw instead of silently mis-bucketing zones', () => {
+    const points = [
+      pt({ timestamp: tsAt(0), heartRate: 140 }),
+      pt({ timestamp: tsAt(10), heartRate: 150 }),
+    ]
+    expect(() => analyze({ points, format: 'gpx' }, {
+      zoneModel: { type: 'hrmax', boundaries: [0.7, 0.6, 0.8, 0.9] },
+    })).toThrow(/strictly increasing/)
+    expect(() => analyze({ points, format: 'gpx' }, {
+      zoneModel: { type: 'hrmax', boundaries: [0, 0.7, 0.8, 0.9] },
+    })).toThrow(/strictly between 0 and 1/)
+    expect(() => analyze({ points, format: 'gpx' }, {
+      zoneModel: { type: 'hrmax', boundaries: [0.6, 0.7, 0.8, 1] },
+    })).toThrow(/strictly between 0 and 1/)
+  })
+
+  test('pauseThresholdMps reclassifies a borderline-speed segment as paused', () => {
+    // Device distance stream (not GPS) so segment speed is exact: segment
+    // 0->1 covers 0.4m in 1s (0.4 m/s), segment 1->2 covers 10m in 10s (1.0 m/s).
+    const points = [
+      pt({ timestamp: tsAt(0), distanceM: 0 }),
+      pt({ timestamp: tsAt(1), distanceM: 0.4 }),
+      pt({ timestamp: tsAt(11), distanceM: 10.4 }),
+    ]
+    const defaultStats = analyze({ points, format: 'gpx' })
+    expect(defaultStats.movingTimeSec).toBe(11) // 0.4 m/s clears the default 0.3 m/s floor
+
+    const customStats = analyze({ points, format: 'gpx' }, { pauseThresholdMps: 0.5 })
+    expect(customStats.movingTimeSec).toBe(10) // 0.4 m/s now counts as paused
+  })
+})
+
 describe('§5 elevation gain/loss — hysteresis filter', () => {
   const elevations = [100, 102, 101, 103, 104, 102, 105]
 

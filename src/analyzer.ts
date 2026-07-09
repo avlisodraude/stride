@@ -5,26 +5,62 @@ import { cumulativeDistanceSeries } from './geo.js'
 // HR zone helpers
 // ---------------------------------------------------------------------------
 
+// Which reference the zone percentage is computed against. Default 'hrmax'
+// reproduces the historical behaviour exactly. 'reserve' uses the Karvonen
+// formula (pct = (hr - restingHR) / (maxHR - restingHR), i.e. % of heart-rate
+// reserve rather than % of HRmax) — a common alternative anchor that shifts
+// low-intensity samples out of z1 relative to %HRmax for the same boundaries.
+export type HrZoneModel =
+  | { type: 'hrmax'; boundaries?: [number, number, number, number] }
+  | { type: 'reserve'; restingHR: number; boundaries?: [number, number, number, number] }
+
+// Default boundaries reproduce the historical, hardcoded 60/70/80/90% bands
+// (see metrics-spec.md §1.3: a deliberate deviation from Garmin's 50-floor
+// default, kept so z1..z5 always sum to the full elapsed time).
+export const DEFAULT_ZONE_BOUNDARIES: [number, number, number, number] = [0.6, 0.7, 0.8, 0.9]
+
+function validateZoneBoundaries(boundaries: [number, number, number, number]): void {
+  for (const b of boundaries) {
+    if (!(b > 0 && b < 1)) {
+      throw new Error(
+        `Invalid HR zone boundaries [${boundaries.join(', ')}]: each boundary must be strictly between 0 and 1 (got ${b}).`
+      )
+    }
+  }
+  for (let i = 1; i < boundaries.length; i++) {
+    if (!(boundaries[i] > boundaries[i - 1])) {
+      throw new Error(
+        `Invalid HR zone boundaries [${boundaries.join(', ')}]: boundaries must be strictly increasing.`
+      )
+    }
+  }
+}
+
 // Each entry is a segment: `weightSec` is the duration to attribute to the
 // zone of `heartRate` (the segment's *ending* sample — see metrics-spec.md
 // §1.2). A segment with no attributable duration (missing/non-monotonic
 // timestamp) or no ending HR sample must carry `weightSec` / `heartRate` as
 // 0 / undefined respectively so it contributes nothing.
-function hrZones(segments: { heartRate?: number; weightSec: number }[], maxHR: number): HeartRateZones {
+function hrZones(
+  segments: { heartRate?: number; weightSec: number }[],
+  pctOf: (heartRate: number) => number,
+  boundaries: [number, number, number, number]
+): HeartRateZones {
   const zones: HeartRateZones = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 }
+  const [b1, b2, b3, b4] = boundaries
 
   for (const seg of segments) {
     if (seg.heartRate == null || seg.weightSec <= 0) continue
-    const pct = seg.heartRate / maxHR
+    const pct = pctOf(seg.heartRate)
     // Deliberate deviation from Garmin's 50/60/70/80/90 model: Garmin's z1
     // floor is 50% HRmax (below that is "no zone"). We have no floor — z1 is
-    // "everything below 60%" — so that z1..z5 always sum to the full elapsed
-    // time (see spec §1.3/§1.4); a 50% floor would leave sub-50% samples
-    // unattributed and break that invariant.
-    if (pct < 0.6) zones.z1 += seg.weightSec
-    else if (pct < 0.7) zones.z2 += seg.weightSec
-    else if (pct < 0.8) zones.z3 += seg.weightSec
-    else if (pct < 0.9) zones.z4 += seg.weightSec
+    // "everything below the first boundary" — so that z1..z5 always sum to
+    // the full elapsed time (see spec §1.3/§1.4); a floor would leave
+    // below-floor samples unattributed and break that invariant.
+    if (pct < b1) zones.z1 += seg.weightSec
+    else if (pct < b2) zones.z2 += seg.weightSec
+    else if (pct < b3) zones.z3 += seg.weightSec
+    else if (pct < b4) zones.z4 += seg.weightSec
     else zones.z5 += seg.weightSec
   }
 
@@ -209,6 +245,11 @@ function resolveDeviceDistanceM(raw: number | undefined, pointStreamDistanceM: n
 export interface AnalyzeOptions {
   maxHR?: number
   elevationThresholdM?: number
+  /** Zone model + boundaries for `hrZones`. Default: `{ type: 'hrmax' }` with
+   * boundaries {@link DEFAULT_ZONE_BOUNDARIES}, reproducing historical output. */
+  zoneModel?: HrZoneModel
+  /** Speed (m/s) below which a segment counts as paused, not moving. Default 0.3. */
+  pauseThresholdMps?: number
 }
 
 export function analyze(activity: Activity, options?: AnalyzeOptions): ActivityStats
@@ -218,7 +259,19 @@ export function analyze(activity: Activity, options?: AnalyzeOptions): ActivityS
 export function analyze(activity: Activity, maxHR: number, elevationThresholdM?: number): ActivityStats
 export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3?: number): ActivityStats {
   const options: AnalyzeOptions = typeof arg2 === 'number' ? { maxHR: arg2, elevationThresholdM: arg3 } : (arg2 ?? {})
-  const { maxHR = 190, elevationThresholdM = DEFAULT_ELEVATION_THRESHOLD_M } = options
+  const {
+    maxHR = 190,
+    elevationThresholdM = DEFAULT_ELEVATION_THRESHOLD_M,
+    zoneModel = { type: 'hrmax' as const },
+    pauseThresholdMps = 0.3,
+  } = options
+
+  const zoneBoundaries = zoneModel.boundaries ?? DEFAULT_ZONE_BOUNDARIES
+  validateZoneBoundaries(zoneBoundaries)
+
+  const pctOfMax = zoneModel.type === 'reserve'
+    ? (hr: number) => (hr - zoneModel.restingHR) / (maxHR - zoneModel.restingHR)
+    : (hr: number) => hr / maxHR
 
   const pts = activity.points
   if (pts.length < 2) {
@@ -237,8 +290,6 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
 
   const { gainAtPoint, totalGainM: elevationGainM, totalLossM: elevationLossM } =
     elevationHysteresis(pts, elevationThresholdM)
-
-  const PAUSE_THRESHOLD_MPS = 0.3 // below this speed = paused
 
   // Cumulative distance series (metrics-spec.md §2.3), from the device's own
   // distance stream when the whole track carries a usable one, else summed
@@ -284,7 +335,7 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
     if (segTimeSec <= 0) segTimeSec = 1
 
     const speedMps = segDist / segTimeSec
-    const isMoving = speedMps > PAUSE_THRESHOLD_MPS
+    const isMoving = speedMps > pauseThresholdMps
 
     if (isMoving) movingTimeSec += segTimeSec
 
@@ -327,7 +378,7 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
     elevationLossM: Math.round(elevationLossM),
     avgHeartRate: hasHR ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : null,
     maxHeartRate: hasHR ? Math.max(...hrValues) : null,
-    hrZones: hasHR ? hrZones(hrZoneSegments, maxHR) : null,
+    hrZones: hasHR ? hrZones(hrZoneSegments, pctOfMax, zoneBoundaries) : null,
     avgCadence: hasCadence ? Math.round(cadValues.reduce((a, b) => a + b, 0) / cadValues.length) : null,
     splits,
   }
