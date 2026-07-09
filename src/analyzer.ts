@@ -206,7 +206,20 @@ function resolveDeviceDistanceM(raw: number | undefined, pointStreamDistanceM: n
   return raw
 }
 
-export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = DEFAULT_ELEVATION_THRESHOLD_M): ActivityStats {
+export interface AnalyzeOptions {
+  maxHR?: number
+  elevationThresholdM?: number
+}
+
+export function analyze(activity: Activity, options?: AnalyzeOptions): ActivityStats
+/**
+ * @deprecated positional arguments will be removed in 3.0.0; pass an options object
+ */
+export function analyze(activity: Activity, maxHR: number, elevationThresholdM?: number): ActivityStats
+export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3?: number): ActivityStats {
+  const options: AnalyzeOptions = typeof arg2 === 'number' ? { maxHR: arg2, elevationThresholdM: arg3 } : (arg2 ?? {})
+  const { maxHR = 190, elevationThresholdM = DEFAULT_ELEVATION_THRESHOLD_M } = options
+
   const pts = activity.points
   if (pts.length < 2) {
     return {

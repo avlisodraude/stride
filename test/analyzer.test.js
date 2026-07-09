@@ -26,7 +26,7 @@ describe('§1 HR zones — time-weighted', () => {
       pt({ lat: 52, lon: 4, timestamp: tsAt(11), heartRate: 184 }),
       pt({ lat: 52, lon: 4, timestamp: tsAt(19), heartRate: 142 }),
     ]
-    const stats = analyze({ points, format: 'gpx' }, 190)
+    const stats = analyze({ points, format: 'gpx' }, { maxHR: 190 })
     expect(stats.hrZones).toEqual({ z1: 0, z2: 0, z3: 16, z4: 0, z5: 3 })
     const total = stats.hrZones.z1 + stats.hrZones.z2 + stats.hrZones.z3 + stats.hrZones.z4 + stats.hrZones.z5
     expect(total).toBe(19)
@@ -38,7 +38,7 @@ describe('§1 HR zones — time-weighted', () => {
       pt({ timestamp: undefined, heartRate: 185 }), // segment into this point has no timestamp -> skip
       pt({ timestamp: tsAt(5), heartRate: 185 }),
     ]
-    const stats = analyze({ points, format: 'gpx' }, 190)
+    const stats = analyze({ points, format: 'gpx' }, { maxHR: 190 })
     // segment0->1 skipped (missing timestamp); segment1->2 also has prev.timestamp undefined -> skipped
     expect(stats.hrZones).toEqual({ z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 })
   })
@@ -49,7 +49,7 @@ describe('§1 HR zones — time-weighted', () => {
       pt({ heartRate: 185 }),
       pt({ heartRate: 185 }),
     ]
-    const stats = analyze({ points, format: 'gpx' }, 190)
+    const stats = analyze({ points, format: 'gpx' }, { maxHR: 190 })
     // 2 segments, 1s each, both ending samples at 185 -> z5 += 1 + 1
     expect(stats.hrZones).toEqual({ z1: 0, z2: 0, z3: 0, z4: 0, z5: 2 })
   })
@@ -73,7 +73,7 @@ describe('§5 elevation gain/loss — hysteresis filter', () => {
   })
 
   test('§5.5 — T=2m gives 7m (documented as still too small for GPS jitter)', () => {
-    const stats = analyze({ points: elevationPoints(), format: 'gpx' }, 190, 2)
+    const stats = analyze({ points: elevationPoints(), format: 'gpx' }, { maxHR: 190, elevationThresholdM: 2 })
     expect(stats.elevationGainM).toBe(7)
   })
 
@@ -175,5 +175,32 @@ describe('§2 rolling best-kilometre pace', () => {
     ]
     const stats = analyze({ points, format: 'gpx' })
     expect(stats.bestKmPaceSecPerKm).toBeNull()
+  })
+})
+
+describe('analyze() signature — options object vs. deprecated positional args', () => {
+  const elevations = [100, 102, 101, 103, 104, 102, 105]
+  const points = elevations.map((elevation, i) => pt({
+    lon: i * 0.0001,
+    timestamp: tsAt(i),
+    elevation,
+    heartRate: 140 + i,
+  }))
+  const activity = { points, format: 'gpx' }
+
+  test('deprecated (activity, maxHR) form matches (activity, { maxHR }) form', () => {
+    const positional = analyze(activity, 170)
+    const options = analyze(activity, { maxHR: 170 })
+    expect(positional).toEqual(options)
+  })
+
+  test('deprecated (activity, maxHR, elevationThresholdM) form matches (activity, { maxHR, elevationThresholdM }) form', () => {
+    const positional = analyze(activity, 170, 2)
+    const options = analyze(activity, { maxHR: 170, elevationThresholdM: 2 })
+    expect(positional).toEqual(options)
+  })
+
+  test('omitting options/positional args entirely uses the same defaults', () => {
+    expect(analyze(activity)).toEqual(analyze(activity, {}))
   })
 })
