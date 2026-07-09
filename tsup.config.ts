@@ -17,4 +17,10 @@ export default defineConfig([
     sourcemap: true,
     target: 'node18',
   },
+  {
+    entry: ['src/cli-lib.ts'],
+    format: ['esm'],
+    sourcemap: true,
+    target: 'node18',
+  },
 ])
