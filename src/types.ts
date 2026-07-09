@@ -68,12 +68,22 @@ export interface ActivityStats {
   hrZones: HeartRateZones | null
   /** Average cadence in steps/min (null if no cadence data) */
   avgCadence: number | null
-  /** Per-kilometre splits: array of { km, paceSecPerKm, elevationGainM } */
+  /**
+   * Per-kilometre splits, including a trailing partial split for any
+   * remainder under 1000m. `sum(splits[i].distanceM) === distanceM`.
+   */
   splits: Split[]
 }
 
 export interface Split {
   km: number
+  /** Distance covered by this split, in metres. Full splits carry 1000; the
+   * final split of an activity may be a partial (< 1000) — identify it by
+   * `distanceM !== 1000`, not by a separate flag. `sum(splits.distanceM)`
+   * always equals the activity's total `distanceM`. */
+  distanceM: number
+  /** Pace normalised to seconds per kilometre, so a partial split's pace is
+   * directly comparable to a full one's. */
   paceSecPerKm: number
   elevationGainM: number
   avgHeartRate?: number

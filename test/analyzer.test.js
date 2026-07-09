@@ -103,8 +103,43 @@ describe('§4 split boundaries — carry overshoot forward', () => {
     ]
     const stats = analyze({ points, format: 'gpx' })
     const paces = stats.splits.map(s => s.paceSecPerKm)
-    // Corrected: km1=300, km2=288, km3=292 (each over a true 1000m), vs the
-    // old drifting-boundary output of [300, 280, 300] over 1400/1000/1000m.
-    expect(paces).toEqual([300, 288, 292])
+    // Corrected: km1=300, km2=288, km3=292 (each over a true 1000m), plus a
+    // trailing 400m partial at pace 300 (§3) — vs the old drifting-boundary
+    // output of [300, 280, 300] over 1400/1000/1000m with the tail dropped.
+    expect(paces).toEqual([300, 288, 292, 300])
+  })
+})
+
+describe('§3 split accounting — trailing partial split', () => {
+  test('§3.4 worked example — 2500m run emits a 500m partial split', () => {
+    const points = [
+      pt({ lon: 0, timestamp: tsAt(0) }),
+      pt({ lon: 0.0089932, timestamp: tsAt(300) }),
+      pt({ lon: 0.0179864, timestamp: tsAt(630) }),
+      pt({ lon: 0.022483, timestamp: tsAt(780) }),
+    ]
+    const stats = analyze({ points, format: 'gpx' })
+    expect(stats.splits.map(s => ({ km: s.km, distanceM: s.distanceM, paceSecPerKm: s.paceSecPerKm }))).toEqual([
+      { km: 1, distanceM: 1000, paceSecPerKm: 300 },
+      { km: 2, distanceM: 1000, paceSecPerKm: 330 },
+      { km: 3, distanceM: 500, paceSecPerKm: 300 },
+    ])
+    const sum = stats.splits.reduce((a, s) => a + s.distanceM, 0)
+    expect(sum).toBe(stats.distanceM)
+  })
+
+  test('invariant: sum(splits.distanceM) === distanceM on a multi-km fixture with a partial tail', () => {
+    // Reuses the §4.3 fixture (3400m: 3 full km + a 400m partial).
+    const points = [
+      pt({ lon: 0, timestamp: tsAt(0) }),
+      pt({ lon: 0.0125905, timestamp: tsAt(420) }),
+      pt({ lon: 0.0215837, timestamp: tsAt(700) }),
+      pt({ lon: 0.0305769, timestamp: tsAt(1000) }),
+    ]
+    const stats = analyze({ points, format: 'gpx' })
+    expect(stats.splits.length).toBe(4)
+    expect(stats.splits[3].distanceM).toBe(400)
+    const sum = stats.splits.reduce((a, s) => a + s.distanceM, 0)
+    expect(sum).toBe(stats.distanceM)
   })
 })

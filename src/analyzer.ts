@@ -127,13 +127,13 @@ function timeAt(x: number, cumDist: number[], cumTime: number[]): number {
 }
 
 // Splits at exact 1000m marks, carrying any overshoot forward instead of
-// resetting at the emitting segment's own (drifting) distance. Only full
-// 1000m splits — the trailing partial is handled separately (metrics-spec.md
-// §3). Per-split elevation gain and average HR are attributed to whichever
+// resetting at the emitting segment's own (drifting) distance, plus a
+// trailing partial split for any remainder under 1000m (metrics-spec.md §3 +
+// §4). Per-split elevation gain and average HR are attributed to whichever
 // split contains each segment's *ending* point (same convention as HR zones,
 // §1.2), not interpolated — the spec calls exact interpolation there
 // unnecessary precision.
-function buildFullSplits(
+function buildSplits(
   pts: { heartRate?: number }[],
   cumDist: number[],
   cumTime: number[],
@@ -147,8 +147,17 @@ function buildFullSplits(
   while (mark + 1000 <= total) {
     const t0 = timeAt(mark, cumDist, cumTime)
     const t1 = timeAt(mark + 1000, cumDist, cumTime)
-    splits.push({ km: km++, paceSecPerKm: Math.round(t1 - t0), elevationGainM: 0 })
+    splits.push({ km: km++, distanceM: 1000, paceSecPerKm: Math.round(t1 - t0), elevationGainM: 0 })
     mark += 1000
+  }
+
+  // Trailing partial (§3.2/§3.3): epsilon guards against floating-point dust
+  // emitting a spurious 0m split when total is an exact multiple of 1000.
+  if (total - mark > 1e-6) {
+    const remainderM = total - mark
+    const remainderTimeSec = timeAt(total, cumDist, cumTime) - timeAt(mark, cumDist, cumTime)
+    const pace = remainderTimeSec / (remainderM / 1000)
+    splits.push({ km: km++, distanceM: Math.round(remainderM), paceSecPerKm: Math.round(pace), elevationGainM: 0 })
   }
 
   const numSplits = splits.length
@@ -250,12 +259,13 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
   }
 
   const distanceM = cumDist[cumDist.length - 1]
-  const splits = buildFullSplits(pts, cumDist, cumTime, gainAtPoint)
+  const splits = buildSplits(pts, cumDist, cumTime, gainAtPoint)
 
-  // Best 1km pace: fastest of the full splits above (metrics-spec.md §4
-  // fixes the split boundaries; §2 replaces this with a true rolling window).
+  // Best 1km pace: fastest of the *full* splits above (the trailing partial
+  // is never eligible, §2.4). §2 replaces this with a true rolling window.
   let bestKmPace: number | null = null
   for (const s of splits) {
+    if (s.distanceM !== 1000) continue
     if (bestKmPace === null || s.paceSecPerKm < bestKmPace) bestKmPace = s.paceSecPerKm
   }
 
