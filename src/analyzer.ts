@@ -49,10 +49,64 @@ function hrZones(segments: { heartRate?: number; weightSec: number }[], maxHR: n
 }
 
 // ---------------------------------------------------------------------------
+// Elevation hysteresis filter (metrics-spec.md §5)
+// ---------------------------------------------------------------------------
+
+// Preferred long-term path (§5.3 step 1): if the source file is FIT and
+// carries a device-computed session.total_ascent, that figure should be used
+// in place of this filter — it is what Garmin/Strava will agree with and was
+// filtered on-device. The parser does not currently surface that field, so
+// this filter is the fallback used for every source today. Out of scope here.
+
+// Default threshold per spec §5.3: 3m sits at the top of the barometric noise
+// band while removing the bulk of per-fix GPS jitter. It is a deliberately
+// conservative default given the library cannot always tell whether a source
+// is barometric or GPS-only; expose it as a parameter so a caller who knows
+// their data is GPS-only can raise it toward Strava's 10m.
+export const DEFAULT_ELEVATION_THRESHOLD_M = 3
+
+// Accumulates confirmed climbs/descents only once the *cumulative* rise from
+// the last confirmed reference point clears `thresholdM`, rejecting
+// oscillation within the noise band. Returns, per point, the confirmed
+// gain/loss amount attributed to that point (its "ending point", consistent
+// with the same convention used for HR zones and splits) so callers can slice
+// the totals by distance range without re-running the filter.
+function elevationHysteresis(
+  points: { elevation?: number }[],
+  thresholdM: number
+): { gainAtPoint: number[]; lossAtPoint: number[]; totalGainM: number; totalLossM: number } {
+  const gainAtPoint = new Array(points.length).fill(0)
+  const lossAtPoint = new Array(points.length).fill(0)
+  let ref: number | null = null
+  let totalGainM = 0
+  let totalLossM = 0
+
+  for (let i = 0; i < points.length; i++) {
+    const ele = points[i].elevation
+    if (ele == null) continue
+    if (ref == null) { ref = ele; continue }
+
+    const diff = ele - ref
+    if (diff >= thresholdM) {
+      gainAtPoint[i] = diff
+      totalGainM += diff
+      ref = ele
+    } else if (-diff >= thresholdM) {
+      lossAtPoint[i] = -diff
+      totalLossM += -diff
+      ref = ele
+    }
+    // else: within the noise band — ignore, keep ref
+  }
+
+  return { gainAtPoint, lossAtPoint, totalGainM, totalLossM }
+}
+
+// ---------------------------------------------------------------------------
 // Main analyzer
 // ---------------------------------------------------------------------------
 
-export function analyze(activity: Activity, maxHR = 190): ActivityStats {
+export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = DEFAULT_ELEVATION_THRESHOLD_M): ActivityStats {
   const pts = activity.points
   if (pts.length < 2) {
     return {
@@ -65,9 +119,10 @@ export function analyze(activity: Activity, maxHR = 190): ActivityStats {
   }
 
   let distanceM = 0
-  let elevationGainM = 0
-  let elevationLossM = 0
   let movingTimeSec = 0
+
+  const { gainAtPoint, totalGainM: elevationGainM, totalLossM: elevationLossM } =
+    elevationHysteresis(pts, elevationThresholdM)
 
   const PAUSE_THRESHOLD_MPS = 0.3 // below this speed = paused
 
@@ -130,20 +185,10 @@ export function analyze(activity: Activity, maxHR = 190): ActivityStats {
     }
     hrZoneSegments.push({ heartRate: curr.heartRate, weightSec: zoneWeightSec })
 
-    // Elevation
-    if (prev.elevation != null && curr.elevation != null) {
-      const diff = curr.elevation - prev.elevation
-      if (diff > 0) elevationGainM += diff
-      else elevationLossM += Math.abs(diff)
-    }
-
     // Split accumulation
     splitDistM += segDist
     splitTimeSec += segTimeSec
-    if (curr.elevation != null && prev.elevation != null) {
-      const diff = curr.elevation - prev.elevation
-      if (diff > 0) splitElevGain += diff
-    }
+    splitElevGain += gainAtPoint[i]
     if (curr.heartRate != null) {
       splitHrSum += curr.heartRate
       splitHrCount++
