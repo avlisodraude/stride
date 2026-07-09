@@ -23,7 +23,6 @@ const BLUE_FILL = 'rgba(59,130,246,0.15)'
 const RED = 'rgba(239,68,68,1)'
 const ORANGE = 'rgba(249,115,22,1)'
 const YELLOW = 'rgba(234,179,8,1)'
-const PURPLE = 'rgba(168,85,247,1)'
 
 // ---------------------------------------------------------------------------
 // Pace over distance
