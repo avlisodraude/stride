@@ -221,7 +221,9 @@ formatDuration(3092)         // "51:32"
 
 | Field | Type | Description |
 |---|---|---|
-| `distanceM` | `number` | Total distance in metres |
+| `distanceM` | `number` | Total distance in metres, from the first to the last recorded point |
+| `distanceSource` | `'device' \| 'computed'` | Whether `distanceM` came from the file's own device distance stream, or was summed from GPS points |
+| `deviceDistanceM` | `number \| undefined` | The device's own total distance for the activity (TCX `<Lap><DistanceMeters>`, FIT `session.totalDistance`). Undefined for GPX. May be larger than `distanceM` — the difference is distance the device accumulated before its first usable position fix, or during segments with no position data; the two numbers answer different questions and aren't required to agree |
 | `elapsedTimeSec` | `number` | Total elapsed time in seconds |
 | `movingTimeSec` | `number` | Moving time (pauses excluded) |
 | `avgPaceSecPerKm` | `number` | Average pace in sec/km |

@@ -87,9 +87,17 @@ function parseTcx(xml: string): Activity {
     first?.['@_Sport']?.toString().toLowerCase() ?? undefined
 
   const points: TrackPoint[] = []
+  // Lap-level <DistanceMeters> is the device's own total for that lap —
+  // distinct from the per-trackpoint <DistanceMeters> read below. A
+  // multi-lap file carries one per lap; the activity's device total is
+  // their sum.
+  let deviceDistanceM: number | undefined
 
   for (const activity of activities) {
     for (const lap of asArray(activity?.Lap)) {
+      const lapDist = Number(lap?.DistanceMeters)
+      if (!isNaN(lapDist)) deviceDistanceM = (deviceDistanceM ?? 0) + lapDist
+
       for (const track of asArray(lap?.Track)) {
         for (const tp of asArray(track?.Trackpoint)) {
           const pos = tp?.Position
@@ -132,7 +140,7 @@ function parseTcx(xml: string): Activity {
 
   const startTime = first?.Id ? new Date(first.Id) : points[0]?.timestamp
 
-  return { type, startTime, points, format: 'tcx' }
+  return { type, startTime, points, format: 'tcx', deviceDistanceM }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +214,8 @@ function parseFit(bytes: Uint8Array): Activity {
   }
 
   const sport = (messages.sportMesgs?.[0] ?? {}) as Record<string, unknown>
-  const session = (messages.sessionMesgs?.[0] ?? {}) as Record<string, unknown>
+  const sessions = (messages.sessionMesgs ?? []) as Record<string, unknown>[]
+  const session = (sessions[0] ?? {}) as Record<string, unknown>
 
   const name = (sport.name as string | undefined) ?? undefined
   const type = ((sport.sport ?? session.sport) as string | undefined)?.toString().toLowerCase()
@@ -214,7 +223,18 @@ function parseFit(bytes: Uint8Array): Activity {
     ? new Date(session.startTime as string | number | Date)
     : points[0]?.timestamp
 
-  return { name, type, startTime, points, format: 'fit' }
+  // session.totalDistance is the device's own total for that session
+  // (camelCase in the SDK's decoded output, not total_distance). A
+  // multisport file carries one session per sport; sum them for the
+  // activity's device total.
+  const sessionDistances = sessions
+    .map(s => s.totalDistance as number | undefined)
+    .filter((d): d is number => d != null && !isNaN(d))
+  const deviceDistanceM = sessionDistances.length > 0
+    ? sessionDistances.reduce((a, b) => a + b, 0)
+    : undefined
+
+  return { name, type, startTime, points, format: 'fit', deviceDistanceM }
 }
 
 // ---------------------------------------------------------------------------

@@ -26,6 +26,22 @@ follows [Semantic Versioning](https://semver.org/).
   tell device-reported distance from the haversine fallback. Additive.
 - **`TrackPoint.distanceM?: number`** — device-reported *cumulative* distance
   from the activity start (metres), populated by the FIT and TCX parsers.
+- **`Activity.deviceDistanceM?: number` / `ActivityStats.deviceDistanceM?:
+  number`** — the device's own *total* distance for the whole activity, read
+  verbatim from TCX `<Lap><DistanceMeters>` (summed across laps) or FIT
+  `session.totalDistance` (summed across sessions). This is separate from the
+  per-point distance stream above: it's a single reported total, not consumed
+  by any computed metric, and passed through unrounded. Undefined for GPX
+  (no such element), and undefined whenever the reported total is 0 or
+  smaller than `distanceM` — a device that didn't record a real total, not a
+  real (if odd) distance.
+
+  **It can legitimately differ from `distanceM`.** `distanceM` only covers
+  the first-to-last *recorded* point; `deviceDistanceM` is the device's own
+  count, which can include distance accumulated before the first usable GPS
+  fix or during position-less segments. If you see `distanceM: 1980` next to
+  `deviceDistanceM: 1983.3` on the same activity, that gap is expected, not a
+  bug — the two numbers answer different questions.
 
 ### Notes
 

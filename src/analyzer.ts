@@ -191,11 +191,28 @@ function buildSplits(
 // Main analyzer
 // ---------------------------------------------------------------------------
 
+// Guards Activity.deviceDistanceM the same way item 2 guards the per-point
+// device distance stream: a value that isn't plausibly "this activity's
+// total" is treated as absent rather than surfaced as-is. A total of 0 means
+// the device didn't record one (most formats omit the field entirely when
+// they have nothing to say, but some emit a zeroed placeholder). A total
+// smaller than the point-stream distance can't be this activity's total
+// either — the device's own total is always at least as large as what was
+// recorded between the first and last point (see Activity.deviceDistanceM
+// for why it's often larger, never smaller, when genuine).
+function resolveDeviceDistanceM(raw: number | undefined, pointStreamDistanceM: number): number | undefined {
+  if (raw == null || raw <= 0) return undefined
+  if (raw < pointStreamDistanceM) return undefined
+  return raw
+}
+
 export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = DEFAULT_ELEVATION_THRESHOLD_M): ActivityStats {
   const pts = activity.points
   if (pts.length < 2) {
     return {
-      distanceM: 0, distanceSource: 'computed', elapsedTimeSec: 0, movingTimeSec: 0,
+      distanceM: 0, distanceSource: 'computed',
+      deviceDistanceM: resolveDeviceDistanceM(activity.deviceDistanceM, 0),
+      elapsedTimeSec: 0, movingTimeSec: 0,
       avgPaceSecPerKm: 0, bestKmPaceSecPerKm: null,
       elevationGainM: 0, elevationLossM: 0,
       avgHeartRate: null, maxHeartRate: null, hrZones: null,
@@ -288,6 +305,7 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
   return {
     distanceM: Math.round(distanceM),
     distanceSource,
+    deviceDistanceM: resolveDeviceDistanceM(activity.deviceDistanceM, distanceM),
     elapsedTimeSec: Math.round(elapsedTimeSec),
     movingTimeSec: Math.round(movingTimeSec),
     avgPaceSecPerKm: Math.round(avgPaceSecPerKm),

@@ -31,6 +31,19 @@ export interface Activity {
   points: TrackPoint[]
   /** Source file format */
   format: 'gpx' | 'fit' | 'tcx'
+  /**
+   * The device's own total distance for the activity, in metres, read
+   * verbatim from the file — TCX `<Lap><DistanceMeters>` (summed across
+   * laps), FIT `session.totalDistance` (summed across sessions). Undefined
+   * for GPX, which has no such element.
+   *
+   * May exceed `ActivityStats.distanceM`, which measures only from the
+   * first to the last *recorded* point: the difference is distance the
+   * device accumulated before its first usable position fix, or during
+   * segments with no position data. That gap is expected, not a bug — the
+   * two numbers answer different questions and are not required to agree.
+   */
+  deviceDistanceM?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +74,25 @@ export interface ActivityStats {
    * always, and any track whose device stream was missing or unusable).
    */
   distanceSource: 'device' | 'computed'
+  /**
+   * The device's own total distance for the activity (see
+   * {@link Activity.deviceDistanceM}), passed through unrounded and
+   * otherwise unchanged — it is reported, not consumed; nothing else here is
+   * derived from it. Unlike `distanceM`, which rounds to the nearest metre
+   * because it is a *computed* sum over many segments, this is a single
+   * value taken verbatim from the file, so rounding it would only discard
+   * precision the device actually reported.
+   *
+   * Undefined when the source format has no such total (GPX), or when the
+   * guard rejects it: a reported total of 0, or one smaller than
+   * `distanceM` (this activity's own point-stream distance), means the
+   * device did not actually record a usable total, and is treated as
+   * absent rather than surfaced as a real, if nonsensical, number. When
+   * present, `deviceDistanceM >= distanceM` always holds — see
+   * {@link Activity.deviceDistanceM} for why the device figure can be
+   * larger.
+   */
+  deviceDistanceM?: number
   /** Total elapsed time in seconds */
   elapsedTimeSec: number
   /** Moving time (excludes pauses) in seconds */
