@@ -104,6 +104,12 @@ function parseTcx(xml: string): Activity {
           if (tp.AltitudeMeters != null) point.elevation = Number(tp.AltitudeMeters)
           if (tp.Time) point.timestamp = new Date(tp.Time)
 
+          // <DistanceMeters> is cumulative distance from the activity start.
+          if (tp.DistanceMeters != null) {
+            const d = Number(tp.DistanceMeters)
+            if (!isNaN(d)) point.distanceM = d
+          }
+
           // <HeartRateBpm><Value>142</Value></HeartRateBpm>
           const hr = tp.HeartRateBpm?.Value ?? tp.HeartRateBpm
           if (hr != null) point.heartRate = Number(hr)
@@ -177,6 +183,11 @@ function parseFit(bytes: Uint8Array): Activity {
     // enhancedAltitude is higher-resolution when present
     const ele = (r.enhancedAltitude ?? r.altitude) as number | undefined
     if (ele != null) point.elevation = ele
+
+    // enhancedDistance is higher-resolution when present; both are cumulative
+    // distance from the activity start, in metres (same read as altitude).
+    const dist = (r.enhancedDistance ?? r.distance) as number | undefined
+    if (dist != null) point.distanceM = dist
 
     if (r.timestamp != null) point.timestamp = new Date(r.timestamp as string | number | Date)
 

@@ -33,3 +33,48 @@ export function cumulativeDistances(points: { lat: number; lon: number }[]): num
   }
   return cumDist
 }
+
+/**
+ * True when the device's own cumulative distance stream is usable for the
+ * whole track: every point carries a finite `distanceM`, the series is
+ * non-decreasing (a pause repeats a value — that is fine), and it is not all
+ * zeros. A field that appears on only some points, goes backwards, or is
+ * uniformly zero is treated as absent — half a device series is worse than
+ * none, because splicing it onto haversine would put a discontinuity in the
+ * cumulative distance.
+ */
+export function hasUsableDeviceDistance(points: { distanceM?: number }[]): boolean {
+  if (points.length === 0) return false
+  let prev = -Infinity
+  let max = 0
+  for (const p of points) {
+    const d = p.distanceM
+    if (d == null || !Number.isFinite(d)) return false
+    if (d < prev) return false            // non-monotonic → treat as absent
+    prev = d
+    if (d > max) max = d
+  }
+  return max > 0                          // all-zero → treat as absent
+}
+
+/**
+ * Cumulative distance in metres, one entry per point, index 0 = 0, built from
+ * whichever source is trustworthy for the *whole* track: the device's own
+ * `distanceM` stream when {@link hasUsableDeviceDistance} holds, otherwise
+ * summed haversine ({@link cumulativeDistances}). Never mix the two per
+ * segment. The device series is re-based to the first point so it shares
+ * haversine's frame (distance from the first recorded point, not from the
+ * device's own zero, which may sit before the first GPS fix).
+ *
+ * This is the single series that must feed `distanceM`, `splits[]`,
+ * `bestKmPaceSecPerKm` and the elevation chart's x-axis — compute it once.
+ */
+export function cumulativeDistanceSeries(
+  points: { lat: number; lon: number; distanceM?: number }[]
+): { cumDist: number[]; source: 'device' | 'computed' } {
+  if (hasUsableDeviceDistance(points)) {
+    const base = points[0].distanceM!
+    return { cumDist: points.map(p => p.distanceM! - base), source: 'device' }
+  }
+  return { cumDist: cumulativeDistances(points), source: 'computed' }
+}

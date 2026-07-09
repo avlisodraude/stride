@@ -1,5 +1,5 @@
 import type { Activity, ActivityStats, Split, HeartRateZones } from './types.js'
-import { haversine } from './geo.js'
+import { cumulativeDistanceSeries } from './geo.js'
 
 // ---------------------------------------------------------------------------
 // HR zone helpers
@@ -195,7 +195,7 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
   const pts = activity.points
   if (pts.length < 2) {
     return {
-      distanceM: 0, elapsedTimeSec: 0, movingTimeSec: 0,
+      distanceM: 0, distanceSource: 'computed', elapsedTimeSec: 0, movingTimeSec: 0,
       avgPaceSecPerKm: 0, bestKmPaceSecPerKm: null,
       elevationGainM: 0, elevationLossM: 0,
       avgHeartRate: null, maxHeartRate: null, hrZones: null,
@@ -210,10 +210,16 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
 
   const PAUSE_THRESHOLD_MPS = 0.3 // below this speed = paused
 
-  // Cumulative distance/elapsed-time series (metrics-spec.md §2.3), used to
-  // build splits at exact km marks via interpolation instead of the
-  // segment's own (drifting) distance.
-  const cumDist: number[] = [0]
+  // Cumulative distance series (metrics-spec.md §2.3), from the device's own
+  // distance stream when the whole track carries a usable one, else summed
+  // haversine. Built once here and reused for splits, best-km and the segment
+  // speeds below — every distance-derived metric shares this one source so
+  // they can never disagree (the elevation chart's x-axis reads it too, via
+  // stats.distanceSource). Per-segment distance is a difference of adjacent
+  // entries, never re-summed a second way.
+  const { cumDist, source: distanceSource } = cumulativeDistanceSeries(pts)
+
+  // Elapsed-time companion series, index 0 = 0, filled in the loop below.
   const cumTime: number[] = [0]
 
   // HR
@@ -236,7 +242,9 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
     const prev = pts[i - 1]
     const curr = pts[i]
 
-    const segDist = haversine(prev, curr)
+    // Segment distance is a difference of the shared cumulative series, so it
+    // reflects whichever source won — never a second, independent haversine.
+    const segDist = cumDist[i] - cumDist[i - 1]
 
     // Time delta
     let segTimeSec = 1 // default 1s between points if no timestamps
@@ -250,7 +258,6 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
 
     if (isMoving) movingTimeSec += segTimeSec
 
-    cumDist.push(cumDist[i - 1] + segDist)
     cumTime.push(cumTime[i - 1] + segTimeSec)
 
     // HR zone weight for this segment (attributed to curr, the ending sample)
@@ -280,6 +287,7 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
 
   return {
     distanceM: Math.round(distanceM),
+    distanceSource,
     elapsedTimeSec: Math.round(elapsedTimeSec),
     movingTimeSec: Math.round(movingTimeSec),
     avgPaceSecPerKm: Math.round(avgPaceSecPerKm),

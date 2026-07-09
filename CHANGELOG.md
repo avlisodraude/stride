@@ -3,6 +3,50 @@
 All notable changes to `@alosha/stride` are documented here. This project
 follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### BREAKING
+
+- **`distanceM` now prefers the device's own distance stream over summed
+  haversine.** When a FIT (`record.distance`/`enhancedDistance`) or TCX
+  (`<DistanceMeters>`) file carries a usable cumulative-distance stream —
+  present on every point, non-decreasing, not all-zero — `analyze()` reports
+  that instead of integrating haversine distances between raw GPS points.
+  Summing per-fix segments accumulated ±3–5 m of GPS jitter as extra path
+  length (typically +1–3%); this is the same class of defect as the 1.0.0
+  elevation-gain fix. Because `distanceM` is the denominator of
+  `avgPaceSecPerKm`, every `splits[]` entry and `bestKmPaceSecPerKm`, those
+  numbers can all shift slightly. GPX has no standard distance element and is
+  unchanged (always `'computed'`).
+
+### Added
+
+- **`ActivityStats.distanceSource: 'device' | 'computed'`** — reports which
+  path produced the distance, splits and best-km series so a consumer can
+  tell device-reported distance from the haversine fallback. Additive.
+- **`TrackPoint.distanceM?: number`** — device-reported *cumulative* distance
+  from the activity start (metres), populated by the FIT and TCX parsers.
+
+### Notes
+
+- The device stream is used only when trustworthy for the *whole* track. A
+  field that is missing on any point, goes backwards, or is uniformly zero is
+  treated as absent and the whole activity falls back to haversine — the two
+  are never mixed per segment, which would put a discontinuity in the
+  cumulative series.
+- The elevation chart's x-axis follows `distanceSource`, so its final
+  distance label continues to match `stats.distanceM`.
+- Sample-fixture movement, device vs. the previous haversine sum:
+
+  | fixture          | distanceM     | avgPaceSecPerKm | bestKmPaceSecPerKm | splits |
+  | ---------------- | ------------- | --------------- | ------------------ | ------ |
+  | `sample-run.fit` | 1983 → **1980** | 303 (unchanged) | 303 (unchanged)    | 2 (unchanged) |
+  | `sample-run.tcx` | 1983 → **1980** | 303 (unchanged) | 303 (unchanged)    | 2 (unchanged) |
+
+  Both sample fixtures were deliberately calibrated so the GPS path length
+  nearly matches the device total, so the shift is small (−3 m, the leading
+  distance before the first GPS fix); files with real GPS jitter move more.
+
 ## 1.0.0
 
 Five metrics in `analyze()` returned numbers that were plausible on sight

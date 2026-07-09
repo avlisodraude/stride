@@ -97,7 +97,7 @@ export function paceChartConfig(
 
 export function elevationChartConfig(
   activity: Activity,
-  _stats: ActivityStats,
+  stats: ActivityStats,
   opts: ChartOptions = {}
 ): ChartConfiguration {
   const units = opts.units ?? 'metric'
@@ -106,12 +106,17 @@ export function elevationChartConfig(
   const pts = activity.points.filter(p => p.elevation != null)
   const step = Math.max(1, Math.floor(pts.length / 200))
 
-  // Cumulative distance over every point (see src/geo.ts) — sampling below
-  // indexes into this, rather than summing chords of the decimated points,
-  // which would undercount the true path length. Uses the same haversine
-  // maths as analyze(), so this chart's distance axis never disagrees with
-  // stats.distanceM.
-  const cumDist = cumulativeDistances(pts)
+  // Cumulative distance over every (elevation-bearing) point (see src/geo.ts)
+  // — sampling below indexes into this, rather than summing chords of the
+  // decimated points, which would undercount the true path length. The axis
+  // must follow whichever source the analyzer chose (stats.distanceSource),
+  // so this chart's distance never disagrees with stats.distanceM: when that
+  // was the device stream, re-base its cumulative `distanceM` to the first
+  // point; otherwise fall back to the same haversine maths as analyze().
+  const useDevice = stats.distanceSource === 'device' && pts.every(p => p.distanceM != null)
+  const cumDist = useDevice
+    ? pts.map(p => p.distanceM! - pts[0].distanceM!)
+    : cumulativeDistances(pts)
 
   const labels: string[] = []
   const elevData: number[] = []

@@ -9,6 +9,15 @@ export interface TrackPoint {
   timestamp?: Date
   heartRate?: number   // bpm
   cadence?: number     // steps/min
+  /**
+   * Device-reported distance from the *activity start*, in metres —
+   * **cumulative, not per-segment**. Present when the source file carries a
+   * distance stream (FIT `record.distance`/`enhancedDistance`, TCX
+   * `<DistanceMeters>`); absent for GPX, which has no standard distance
+   * element. The analyzer prefers this over summed haversine when the whole
+   * track has it and it is non-decreasing (see {@link ActivityStats.distanceSource}).
+   */
+  distanceM?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +52,15 @@ export interface HeartRateZones {
 export interface ActivityStats {
   /** Total distance in metres */
   distanceM: number
+  /**
+   * Which distance source produced `distanceM`, the cumulative series behind
+   * `splits[]`/`bestKmPaceSecPerKm`, and the elevation chart's x-axis:
+   * `'device'` when the file's own cumulative distance stream was usable
+   * (present on every point, non-decreasing, not all-zero), `'computed'` when
+   * it fell back to summing haversine distances between raw GPS points (GPX
+   * always, and any track whose device stream was missing or unusable).
+   */
+  distanceSource: 'device' | 'computed'
   /** Total elapsed time in seconds */
   elapsedTimeSec: number
   /** Moving time (excludes pauses) in seconds */

@@ -31,6 +31,9 @@ describe('TCX parsing', () => {
 
   test('computes running metrics from TCX data', () => {
     const stats = analyze(parse(tcxString))
+    // The fixture carries <DistanceMeters>, so distance comes from the device
+    // stream (1980m) rather than the summed haversine path (~1983m).
+    expect(stats.distanceSource).toBe('device')
     expect(stats.distanceM).toBeGreaterThan(1900)
     expect(stats.distanceM).toBeLessThan(2100)
     expect(stats.movingTimeSec).toBeGreaterThan(590)
