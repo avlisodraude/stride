@@ -126,6 +126,31 @@ function timeAt(x: number, cumDist: number[], cumTime: number[]): number {
   return cumTime[lo - 1] + f * (cumTime[lo] - cumTime[lo - 1])
 }
 
+// Fastest 1000m window anywhere in the activity (metrics-spec.md §2), found
+// by scanning the finite candidate set of breakpoints where a window edge
+// coincides with a recorded point — the minimum of the continuous
+// timeAt(s+1000) - timeAt(s) function is always attained at one of these, so
+// a continuous scan isn't needed. Computed from the cumulative series only
+// — independent of splits[] (§2.4) — so it can be faster than (never slower
+// than) the fastest full split, since it isn't quantised to km marks.
+function computeBestKmPaceSecPerKm(cumDist: number[], cumTime: number[]): number | null {
+  const total = cumDist[cumDist.length - 1]
+  if (total < 1000) return null
+
+  const candidates = new Set<number>([0, total - 1000])
+  for (const d of cumDist) {
+    if (d + 1000 <= total) candidates.add(d)
+    if (d - 1000 >= 0) candidates.add(d - 1000)
+  }
+
+  let best = Infinity
+  for (const s of candidates) {
+    const windowTime = timeAt(s + 1000, cumDist, cumTime) - timeAt(s, cumDist, cumTime)
+    if (windowTime < best) best = windowTime
+  }
+  return Math.round(best)
+}
+
 // Splits at exact 1000m marks, carrying any overshoot forward instead of
 // resetting at the emitting segment's own (drifting) distance, plus a
 // trailing partial split for any remainder under 1000m (metrics-spec.md §3 +
@@ -261,13 +286,7 @@ export function analyze(activity: Activity, maxHR = 190, elevationThresholdM = D
   const distanceM = cumDist[cumDist.length - 1]
   const splits = buildSplits(pts, cumDist, cumTime, gainAtPoint)
 
-  // Best 1km pace: fastest of the *full* splits above (the trailing partial
-  // is never eligible, §2.4). §2 replaces this with a true rolling window.
-  let bestKmPace: number | null = null
-  for (const s of splits) {
-    if (s.distanceM !== 1000) continue
-    if (bestKmPace === null || s.paceSecPerKm < bestKmPace) bestKmPace = s.paceSecPerKm
-  }
+  const bestKmPace = computeBestKmPaceSecPerKm(cumDist, cumTime)
 
   const elapsedTimeSec =
     pts[0].timestamp && pts[pts.length - 1].timestamp

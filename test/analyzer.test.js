@@ -143,3 +143,37 @@ describe('§3 split accounting — trailing partial split', () => {
     expect(sum).toBe(stats.distanceM)
   })
 })
+
+describe('§2 rolling best-kilometre pace', () => {
+  test('§2.5 worked example — rolling window interpolated at a non-recorded point beats the bucketed split', () => {
+    const points = [
+      pt({ lon: 0, timestamp: tsAt(0) }),
+      pt({ lon: 0.0053959, timestamp: tsAt(180) }),
+      pt({ lon: 0.0125905, timestamp: tsAt(380) }),
+    ]
+    const stats = analyze({ points, format: 'gpx' })
+    expect(stats.bestKmPaceSecPerKm).toBe(260)
+  })
+
+  test('§4.3 — rolling best (280) equals the bucketed best there, and is independent of splits (min split pace is 288)', () => {
+    const points = [
+      pt({ lon: 0, timestamp: tsAt(0) }),
+      pt({ lon: 0.0125905, timestamp: tsAt(420) }),
+      pt({ lon: 0.0215837, timestamp: tsAt(700) }),
+      pt({ lon: 0.0305769, timestamp: tsAt(1000) }),
+    ]
+    const stats = analyze({ points, format: 'gpx' })
+    expect(stats.bestKmPaceSecPerKm).toBe(280)
+    const minFullSplitPace = Math.min(...stats.splits.filter(s => s.distanceM === 1000).map(s => s.paceSecPerKm))
+    expect(minFullSplitPace).toBe(288)
+  })
+
+  test('§2.4 — total distance under 1000m yields bestKmPaceSecPerKm = null', () => {
+    const points = [
+      pt({ lon: 0, timestamp: tsAt(0) }),
+      pt({ lon: 0.001, timestamp: tsAt(10) }),
+    ]
+    const stats = analyze({ points, format: 'gpx' })
+    expect(stats.bestKmPaceSecPerKm).toBeNull()
+  })
+})

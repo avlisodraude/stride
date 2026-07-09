@@ -49,7 +49,12 @@ export interface ActivityStats {
   movingTimeSec: number
   /** Average pace in seconds per kilometre */
   avgPaceSecPerKm: number
-  /** Best 1km split pace in seconds per kilometre */
+  /**
+   * Fastest 1000m anywhere in the activity (elapsed time, seconds per km),
+   * as a rolling window over the cumulative distance/time series —
+   * independent of splits[] and not quantised to km marks. Null if the
+   * activity covers less than 1000m.
+   */
   bestKmPaceSecPerKm: number | null
   /** Total elevation gain in metres */
   elevationGainM: number
