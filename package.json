@@ -33,7 +33,7 @@
     "url": "git+https://github.com/avlisodraude/stride.git"
   },
   "license": "MIT",
-  "author": "Eduardo Silvanavarrete <avlis_odraude@hotmail.com>",
+  "author": "Eduardo Silva Navarrete <avlis_odraude@hotmail.com>",
   "type": "module",
   "exports": {
     ".": {
