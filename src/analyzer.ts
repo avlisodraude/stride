@@ -22,24 +22,30 @@ function haversine(a: { lat: number; lon: number }, b: { lat: number; lon: numbe
 // HR zone helpers
 // ---------------------------------------------------------------------------
 
-function hrZones(points: { heartRate?: number }[], maxHR: number): HeartRateZones {
+// Each entry is a segment: `weightSec` is the duration to attribute to the
+// zone of `heartRate` (the segment's *ending* sample — see metrics-spec.md
+// §1.2). A segment with no attributable duration (missing/non-monotonic
+// timestamp) or no ending HR sample must carry `weightSec` / `heartRate` as
+// 0 / undefined respectively so it contributes nothing.
+function hrZones(segments: { heartRate?: number; weightSec: number }[], maxHR: number): HeartRateZones {
   const zones: HeartRateZones = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 }
-  let count = 0
 
-  for (const p of points) {
-    if (p.heartRate == null) continue
-    count++
-    const pct = p.heartRate / maxHR
-    if (pct < 0.6) zones.z1++
-    else if (pct < 0.7) zones.z2++
-    else if (pct < 0.8) zones.z3++
-    else if (pct < 0.9) zones.z4++
-    else zones.z5++
+  for (const seg of segments) {
+    if (seg.heartRate == null || seg.weightSec <= 0) continue
+    const pct = seg.heartRate / maxHR
+    // Deliberate deviation from Garmin's 50/60/70/80/90 model: Garmin's z1
+    // floor is 50% HRmax (below that is "no zone"). We have no floor — z1 is
+    // "everything below 60%" — so that z1..z5 always sum to the full elapsed
+    // time (see spec §1.3/§1.4); a 50% floor would leave sub-50% samples
+    // unattributed and break that invariant.
+    if (pct < 0.6) zones.z1 += seg.weightSec
+    else if (pct < 0.7) zones.z2 += seg.weightSec
+    else if (pct < 0.8) zones.z3 += seg.weightSec
+    else if (pct < 0.9) zones.z4 += seg.weightSec
+    else zones.z5 += seg.weightSec
   }
 
-  // Convert count (seconds approximation) to actual seconds
-  // Each point ≈ 1 second apart in most GPS watches
-  return count > 0 ? zones : { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 }
+  return zones
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +87,14 @@ export function analyze(activity: Activity, maxHR = 190): ActivityStats {
   const hrValues = pts.map(p => p.heartRate).filter((h): h is number => h != null)
   const hasHR = hrValues.length > 0
 
+  // HR zone weighting (metrics-spec.md §1): if no point in the whole activity
+  // carries a timestamp, fall back to counting each segment as 1s (§1.5.3).
+  // Otherwise a segment with a missing/non-monotonic timestamp contributes 0s
+  // — it must NOT fall back to 1s, that would re-introduce the count bias
+  // for exactly the corrupt segments (§1.5.2).
+  const noTimestampsAtAll = pts.every(p => p.timestamp == null)
+  const hrZoneSegments: { heartRate?: number; weightSec: number }[] = []
+
   // Cadence
   const cadValues = pts.map(p => p.cadence).filter((c): c is number => c != null)
   const hasCadence = cadValues.length > 0
@@ -103,6 +117,18 @@ export function analyze(activity: Activity, maxHR = 190): ActivityStats {
 
     distanceM += segDist
     if (isMoving) movingTimeSec += segTimeSec
+
+    // HR zone weight for this segment (attributed to curr, the ending sample)
+    let zoneWeightSec: number
+    if (noTimestampsAtAll) {
+      zoneWeightSec = 1
+    } else if (prev.timestamp == null || curr.timestamp == null) {
+      zoneWeightSec = 0
+    } else {
+      const rawDt = (curr.timestamp.getTime() - prev.timestamp.getTime()) / 1000
+      zoneWeightSec = rawDt > 0 ? rawDt : 0
+    }
+    hrZoneSegments.push({ heartRate: curr.heartRate, weightSec: zoneWeightSec })
 
     // Elevation
     if (prev.elevation != null && curr.elevation != null) {
@@ -155,7 +181,7 @@ export function analyze(activity: Activity, maxHR = 190): ActivityStats {
     elevationLossM: Math.round(elevationLossM),
     avgHeartRate: hasHR ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : null,
     maxHeartRate: hasHR ? Math.max(...hrValues) : null,
-    hrZones: hasHR ? hrZones(pts, maxHR) : null,
+    hrZones: hasHR ? hrZones(hrZoneSegments, maxHR) : null,
     avgCadence: hasCadence ? Math.round(cadValues.reduce((a, b) => a + b, 0) / cadValues.length) : null,
     splits,
   }

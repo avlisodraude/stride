@@ -29,11 +29,15 @@ export interface Activity {
 // ---------------------------------------------------------------------------
 
 export interface HeartRateZones {
-  z1: number   // Easy       < 60% HRmax  (seconds)
-  z2: number   // Aerobic    60–70%
-  z3: number   // Tempo      70–80%
-  z4: number   // Threshold  80–90%
-  z5: number   // Max        > 90%
+  /** Below 60% HRmax (seconds). Includes warm-up/recovery/below-zone — there
+   * is no separate floor, so z1..z5 always sum to the HR-covered elapsed
+   * time. */
+  z1: number
+  z2: number   // 60–70% HRmax (seconds)
+  z3: number   // 70–80% HRmax (seconds)
+  z4: number   // 80–90% HRmax (seconds)
+  /** ≥ 90% HRmax (seconds). */
+  z5: number
 }
 
 export interface ActivityStats {
@@ -55,7 +59,12 @@ export interface ActivityStats {
   avgHeartRate: number | null
   /** Max heart rate in bpm (null if no HR data) */
   maxHeartRate: number | null
-  /** Heart rate zone breakdown in seconds (null if no HR data) */
+  /**
+   * Heart rate zone breakdown in seconds (null if no HR data). Each sample's
+   * zone is weighted by the duration of the segment ending at that sample,
+   * not by sample count. If the activity has no timestamps at all, 1s per
+   * segment is assumed as a fallback (count-weighting).
+   */
   hrZones: HeartRateZones | null
   /** Average cadence in steps/min (null if no cadence data) */
   avgCadence: number | null
