@@ -152,7 +152,7 @@ and take the minimum window time. (A two-pointer sweep advancing both edges thro
 
 ### 2.5 Worked example — rolling best-km with interpolation
 
-Three points on the equator (`lat = 0`), so haversine distance ≈ `lon_deg × 111 319.5 m`. The middle segment is faster than the first.
+Three points on the equator (`lat = 0`), so haversine distance ≈ `lon_deg × 111 194.93 m` (see Appendix A). The middle segment is faster than the first.
 
 | Point | lat | lon | cumulative dist | timestamp (offset s) |
 |------:|----:|------------:|----------------:|---------------------:|
@@ -414,4 +414,4 @@ Primary / authoritative sources only.
 
 ## Appendix A — Fixture provenance
 
-All worked-example distances are generated on the equator (`lat = 0`) so that haversine distance is `lon_deg × 111 319.49 m`. The `lon` values quoted (7 decimal places) reproduce the stated cumulative distances to within 0.5 m — i.e. each rounds to the exact integer metre value used in the arithmetic above. The current-vs-corrected outputs in §§1.6, 2.5, 3.4, 4.3, 5.5 were computed, not estimated, and are the **normative** expected values for the implementation's test fixtures. An example whose output the implementer changes is a spec violation, not a judgement call.
+All worked-example distances are generated on the equator (`lat = 0`) so that haversine distance is `lon_deg × 111 194.93 m`. **That constant is `R · π/180` for the spherical `R = 6 371 000 m` used by `haversine()` in `src/analyzer.ts:7` — it is *not* the WGS84 equatorial figure of 111 319.49 m.** Using the WGS84 value to recompute these fixtures yields distances ~0.7–1.6 m larger and will make the examples below appear wrong; they are not. The `lon` values quoted (7 decimal places) reproduce the stated cumulative distances against the code's own constant to within 0.01 m (verified: p0→p1 = 599.997 m, p1→p2 = 800.003 m). The current-vs-corrected outputs in §§1.6, 2.5, 3.4, 4.3, 5.5 were computed, not estimated, and are the **normative** expected values for the implementation's test fixtures. An example whose output the implementer changes is a spec violation, not a judgement call. The current-vs-corrected outputs in §§1.6, 2.5, 3.4, 4.3, 5.5 were computed, not estimated, and are the **normative** expected values for the implementation's test fixtures. An example whose output the implementer changes is a spec violation, not a judgement call.
