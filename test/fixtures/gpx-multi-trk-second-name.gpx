@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="stride-test">
+  <trk>
+    <type>cycling</type>
+    <trkseg>
+      <trkpt lat="11.000000" lon="21.000000">
+        <ele>1.0</ele>
+        <time>2026-01-04T06:00:00Z</time>
+      </trkpt>
+      <trkpt lat="11.001000" lon="21.001000">
+        <ele>1.5</ele>
+        <time>2026-01-04T06:00:05Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+  <trk>
+    <name>Afternoon Ride</name>
+    <type>cycling</type>
+    <trkseg>
+      <trkpt lat="16.000000" lon="26.000000">
+        <ele>2.0</ele>
+        <time>2026-01-04T06:01:00Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

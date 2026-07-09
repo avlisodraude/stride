@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="stride-test">
+  <metadata>
+    <name>Multi Track Run</name>
+  </metadata>
+  <trk>
+    <name>Segment A</name>
+    <type>running</type>
+    <trkseg>
+      <trkpt lat="10.000000" lon="20.000000">
+        <ele>1.0</ele>
+        <time>2026-01-03T06:00:00Z</time>
+      </trkpt>
+      <trkpt lat="10.001000" lon="20.001000">
+        <ele>1.5</ele>
+        <time>2026-01-03T06:00:05Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+  <trk>
+    <name>Segment B</name>
+    <type>running</type>
+    <trkseg>
+      <trkpt lat="15.000000" lon="25.000000">
+        <ele>2.0</ele>
+        <time>2026-01-03T06:01:00Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+  <trk>
+    <name>Segment C</name>
+    <type>running</type>
+    <trkseg>
+      <trkpt lat="30.000000" lon="40.000000">
+        <ele>3.0</ele>
+        <time>2026-01-03T06:02:00Z</time>
+      </trkpt>
+      <trkpt lat="30.001000" lon="40.001000">
+        <ele>3.5</ele>
+        <time>2026-01-03T06:02:05Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

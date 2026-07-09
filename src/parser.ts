@@ -9,56 +9,59 @@ const xmlParser = new XMLParser({
   parseAttributeValue: true,
 })
 
+function asArray<T>(v: T | T[] | undefined): T[] {
+  if (v == null) return []
+  return Array.isArray(v) ? v : [v]
+}
+
 function parseGpx(xml: string): Activity {
   const doc = xmlParser.parse(xml)
   const gpx = doc.gpx
 
+  const tracks = asArray(gpx?.trk)
+  const firstTrack = tracks[0]
+
   const name: string | undefined =
-    gpx?.metadata?.name ?? gpx?.trk?.name ?? undefined
+    gpx?.metadata?.name ?? firstTrack?.name ?? undefined
 
   const type: string | undefined =
-    gpx?.trk?.type?.toString().toLowerCase() ?? undefined
-
-  // Collect all trkpt elements
-  const trkseg = gpx?.trk?.trkseg
-  const segments = Array.isArray(trkseg) ? trkseg : [trkseg]
+    firstTrack?.type?.toString().toLowerCase() ?? undefined
 
   const points: TrackPoint[] = []
 
-  for (const seg of segments) {
-    if (!seg?.trkpt) continue
-    const trkpts = Array.isArray(seg.trkpt) ? seg.trkpt : [seg.trkpt]
+  for (const trk of tracks) {
+    for (const seg of asArray(trk?.trkseg)) {
+      for (const pt of asArray(seg?.trkpt)) {
+        const lat = parseFloat(pt['@_lat'])
+        const lon = parseFloat(pt['@_lon'])
+        if (isNaN(lat) || isNaN(lon)) continue
 
-    for (const pt of trkpts) {
-      const lat = parseFloat(pt['@_lat'])
-      const lon = parseFloat(pt['@_lon'])
-      if (isNaN(lat) || isNaN(lon)) continue
+        const point: TrackPoint = { lat, lon }
 
-      const point: TrackPoint = { lat, lon }
+        if (pt.ele != null) point.elevation = parseFloat(pt.ele)
+        if (pt.time) point.timestamp = new Date(pt.time)
 
-      if (pt.ele != null) point.elevation = parseFloat(pt.ele)
-      if (pt.time) point.timestamp = new Date(pt.time)
+        // Garmin extensions (heart rate + cadence)
+        const ext = pt.extensions
+        if (ext) {
+          const tpx =
+            ext['gpxtpx:TrackPointExtension'] ??
+            ext['ns3:TrackPointExtension'] ??
+            ext.TrackPointExtension
 
-      // Garmin extensions (heart rate + cadence)
-      const ext = pt.extensions
-      if (ext) {
-        const tpx =
-          ext['gpxtpx:TrackPointExtension'] ??
-          ext['ns3:TrackPointExtension'] ??
-          ext.TrackPointExtension
+          if (tpx) {
+            const hr =
+              tpx['gpxtpx:hr'] ?? tpx['ns3:hr'] ?? tpx.hr
+            const cad =
+              tpx['gpxtpx:cad'] ?? tpx['ns3:cad'] ?? tpx.cad
 
-        if (tpx) {
-          const hr =
-            tpx['gpxtpx:hr'] ?? tpx['ns3:hr'] ?? tpx.hr
-          const cad =
-            tpx['gpxtpx:cad'] ?? tpx['ns3:cad'] ?? tpx.cad
-
-          if (hr != null) point.heartRate = parseInt(hr)
-          if (cad != null) point.cadence = parseInt(cad) * 2 // Garmin stores per-foot cadence
+            if (hr != null) point.heartRate = parseInt(hr)
+            if (cad != null) point.cadence = parseInt(cad) * 2 // Garmin stores per-foot cadence
+          }
         }
-      }
 
-      points.push(point)
+        points.push(point)
+      }
     }
   }
 
@@ -74,11 +77,6 @@ function parseGpx(xml: string): Activity {
 // ---------------------------------------------------------------------------
 // TCX (Garmin Training Center XML) — Garmin / Strava / Wahoo exports
 // ---------------------------------------------------------------------------
-
-function asArray<T>(v: T | T[] | undefined): T[] {
-  if (v == null) return []
-  return Array.isArray(v) ? v : [v]
-}
 
 function parseTcx(xml: string): Activity {
   const doc = xmlParser.parse(xml)

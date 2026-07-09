@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="stride-test">
+  <metadata>
+    <name>Morning Run</name>
+  </metadata>
+  <trk>
+    <name>Track 1</name>
+    <type>running</type>
+    <trkseg>
+      <trkpt lat="52.370000" lon="4.900000">
+        <ele>10.0</ele>
+        <time>2026-01-01T06:00:00Z</time>
+      </trkpt>
+      <trkpt lat="52.370100" lon="4.900100">
+        <ele>10.5</ele>
+        <time>2026-01-01T06:00:05Z</time>
+      </trkpt>
+      <trkpt lat="52.370200" lon="4.900200">
+        <ele>11.0</ele>
+        <time>2026-01-01T06:00:10Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>
