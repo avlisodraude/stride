@@ -61,6 +61,20 @@ describe('elevationChartConfig', () => {
       expect(v).toBeLessThanOrEqual(14)
     })
   })
+
+  // Regression guard for the flat-earth + decimated-cumulative-sum bug: the
+  // chart's own distance maths must agree with analyze()'s, not drift from
+  // it (they used to disagree by ~60% on this fixture).
+  test('final x-axis label matches stats.distanceM, to within the label\'s own rounding', () => {
+    const config = elevationChartConfig(activity, stats)
+    const lastLabel = config.data.labels[config.data.labels.length - 1]
+    const labelKm = parseFloat(lastLabel)
+
+    expect(lastLabel.endsWith('km')).toBe(true)
+    // Label is rounded to one decimal place (100m), so allow up to 50m of
+    // rounding slack on either side.
+    expect(Math.abs(labelKm * 1000 - stats.distanceM)).toBeLessThanOrEqual(50)
+  })
 })
 
 describe('heartRateChartConfig', () => {

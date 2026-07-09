@@ -12,9 +12,10 @@
  *   new Chart(canvas, paceChartConfig(activity, stats))
  */
 
-import type { Activity, ActivityStats, ChartOptions } from './types.js'
+import type { Activity, ActivityStats, ChartOptions, Split } from './types.js'
 import type { ChartConfiguration } from 'chart.js'
-import { formatPace } from './analyzer.js'
+import { formatPace, formatDuration } from './analyzer.js'
+import { cumulativeDistances } from './geo.js'
 
 const GREEN = 'rgba(34,197,94,1)'
 const GREEN_FILL = 'rgba(34,197,94,0.15)'
@@ -23,6 +24,23 @@ const BLUE_FILL = 'rgba(59,130,246,0.15)'
 const RED = 'rgba(239,68,68,1)'
 const ORANGE = 'rgba(249,115,22,1)'
 const YELLOW = 'rgba(234,179,8,1)'
+
+// Fades an `rgba(...,1)` constant to a lower alpha, used to visually mark the
+// trailing partial split's bar as "less than the others" rather than letting
+// it read as a full kilometre.
+function fade(rgba: string, alpha: number): string {
+  return rgba.replace(/,1\)$/, `,${alpha})`)
+}
+
+// A partial split's `distanceM` differs from 1000 (see types.ts) — label it
+// distinctly so a chart never presents it as if a full kilometre were run.
+function splitLabel(split: Split, units: 'metric' | 'imperial'): string {
+  if (split.distanceM === 1000) return `km ${split.km}`
+  const partialDist = units === 'imperial'
+    ? `${(split.distanceM / 1609.34).toFixed(2)} mi`
+    : `${(split.distanceM / 1000).toFixed(2)} km`
+  return `km ${split.km} (${partialDist})`
+}
 
 // ---------------------------------------------------------------------------
 // Pace over distance
@@ -39,7 +57,7 @@ export function paceChartConfig(
   return {
     type: 'line',
     data: {
-      labels: splits.map(s => `km ${s.km}`),
+      labels: splits.map(s => splitLabel(s, units)),
       datasets: [{
         label: `Pace (${units === 'metric' ? 'min/km' : 'min/mi'})`,
         data: splits.map(s => +(s.paceSecPerKm / 60).toFixed(2)),
@@ -87,30 +105,25 @@ export function elevationChartConfig(
   // Downsample to max 200 points for performance
   const pts = activity.points.filter(p => p.elevation != null)
   const step = Math.max(1, Math.floor(pts.length / 200))
-  const sampled = pts.filter((_, i) => i % step === 0)
 
-  // Compute cumulative distance labels
-  let cumDist = 0
+  // Cumulative distance over every point (see src/geo.ts) — sampling below
+  // indexes into this, rather than summing chords of the decimated points,
+  // which would undercount the true path length. Uses the same haversine
+  // maths as analyze(), so this chart's distance axis never disagrees with
+  // stats.distanceM.
+  const cumDist = cumulativeDistances(pts)
+
   const labels: string[] = []
-  for (let i = 0; i < sampled.length; i++) {
-    if (i > 0) {
-      const prev = sampled[i - 1]
-      const curr = sampled[i]
-      const d = Math.sqrt(
-        Math.pow((curr.lat - prev.lat) * 111_000, 2) +
-        Math.pow((curr.lon - prev.lon) * 111_000, 2)
-      )
-      cumDist += d
-    }
-    const distKm = cumDist / 1000
+  const elevData: number[] = []
+  for (let i = 0; i < pts.length; i += step) {
+    const distKm = cumDist[i] / 1000
     labels.push(units === 'imperial'
       ? `${(distKm * 0.621371).toFixed(1)} mi`
       : `${distKm.toFixed(1)} km`)
-  }
 
-  const elevData = sampled.map(p =>
-    units === 'imperial' ? +((p.elevation! * 3.28084).toFixed(1)) : +(p.elevation!.toFixed(1))
-  )
+    const elevation = pts[i].elevation!
+    elevData.push(units === 'imperial' ? +(elevation * 3.28084).toFixed(1) : +elevation.toFixed(1))
+  }
 
   return {
     type: 'line',
@@ -182,16 +195,21 @@ export function heartRateChartConfig(
 // HR zone doughnut
 // ---------------------------------------------------------------------------
 
+// A GPX/TCX/FIT file with no heart rate data is ordinary input (many watches
+// don't pair a strap), not an error condition — so this returns a usable,
+// all-zero placeholder chart rather than throwing. A caller rendering a
+// dashboard of several charts gets a clearly-labelled empty doughnut instead
+// of a crash that takes the rest of the dashboard down with it.
 export function hrZonesChartConfig(stats: ActivityStats): ChartConfiguration {
-  const zones = stats.hrZones
-  if (!zones) throw new Error('No heart rate data available for zone chart')
+  const zones = stats.hrZones ?? { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 }
+  const zoneValues = [zones.z1, zones.z2, zones.z3, zones.z4, zones.z5]
 
   return {
     type: 'doughnut',
     data: {
       labels: ['Z1 Easy', 'Z2 Aerobic', 'Z3 Tempo', 'Z4 Threshold', 'Z5 Max'],
       datasets: [{
-        data: [zones.z1, zones.z2, zones.z3, zones.z4, zones.z5],
+        data: zoneValues,
         backgroundColor: [BLUE, GREEN, YELLOW, ORANGE, RED],
         borderWidth: 0,
       }],
@@ -199,13 +217,21 @@ export function hrZonesChartConfig(stats: ActivityStats): ChartConfiguration {
     options: {
       responsive: true,
       plugins: {
-        title: { display: true, text: 'Heart rate zones' },
+        title: {
+          display: true,
+          text: stats.hrZones
+            ? 'Heart rate zones'
+            : ['Heart rate zones', 'No heart rate data recorded'],
+        },
         tooltip: {
           callbacks: {
+            // Zones are seconds (as of 1.0.0, not sample counts) — show them
+            // as minutes:seconds, which is friendlier than a bare number of
+            // seconds, alongside the share of HR-covered time it represents.
             label: (ctx) => {
-              const total = [zones.z1, zones.z2, zones.z3, zones.z4, zones.z5].reduce((a, b) => a + b, 0)
+              const total = zoneValues.reduce((a, b) => a + b, 0)
               const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : '0'
-              return `${ctx.label}: ${pct}%`
+              return `${ctx.label}: ${formatDuration(ctx.parsed)} (${pct}%)`
             },
           },
         },
@@ -229,13 +255,16 @@ export function splitsChartConfig(
   return {
     type: 'bar',
     data: {
-      labels: splits.map(s => `km ${s.km}`),
+      labels: splits.map(s => splitLabel(s, units)),
       datasets: [{
         label: 'Split pace',
         data: splits.map(s => +(s.paceSecPerKm / 60).toFixed(2)),
-        backgroundColor: splits.map(s =>
-          s.paceSecPerKm <= avgPace ? GREEN : ORANGE
-        ),
+        // Trailing partial split's bar is faded to signal "less than the
+        // others" visually, on top of its distinct label.
+        backgroundColor: splits.map(s => {
+          const base = s.paceSecPerKm <= avgPace ? GREEN : ORANGE
+          return s.distanceM === 1000 ? base : fade(base, 0.5)
+        }),
         borderRadius: 4,
       }],
     },

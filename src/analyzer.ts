@@ -1,22 +1,5 @@
 import type { Activity, ActivityStats, Split, HeartRateZones } from './types.js'
-
-// ---------------------------------------------------------------------------
-// Geo helpers
-// ---------------------------------------------------------------------------
-
-const R = 6_371_000 // Earth radius in metres
-
-function haversine(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLon = toRad(b.lon - a.lon)
-  const sinDLat = Math.sin(dLat / 2)
-  const sinDLon = Math.sin(dLon / 2)
-  const x =
-    sinDLat * sinDLat +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinDLon * sinDLon
-  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
-}
+import { haversine } from './geo.js'
 
 // ---------------------------------------------------------------------------
 // HR zone helpers
