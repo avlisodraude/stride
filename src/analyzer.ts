@@ -244,6 +244,39 @@ function resolveDeviceDistanceM(raw: number | undefined, pointStreamDistanceM: n
   return raw
 }
 
+// Resolve the activity's elevation gain/loss and record which source produced
+// them (metrics-spec.md §5.3 step 1 + §5.6). The device's own session-computed
+// total (FIT session.total_ascent/total_descent, surfaced as
+// Activity.deviceElevationGainM/LossM) is preferred when the file carries one:
+// it is barometric/fused, filtered on-device, and the figure Garmin Connect
+// and Strava agree with. Otherwise fall back to the GPS-altitude hysteresis
+// totals passed in.
+function resolveElevation(
+  activity: Activity,
+  hystGainM: number,
+  hystLossM: number,
+  hasAltitudeStream: boolean,
+): { gainM: number; lossM: number; source: 'device' | 'computed' } {
+  const deviceGain = activity.deviceElevationGainM
+  if (deviceGain == null) {
+    return { gainM: hystGainM, lossM: hystLossM, source: 'computed' }
+  }
+  // Zero-guard: a device total_ascent of 0 on a track that plainly climbs —
+  // a raw altitude stream is present *and* the hysteresis filter already
+  // found real gain — is a device that never populated the field, not a flat
+  // run, so fall back to the computed figure rather than report a false 0. A
+  // 0 with no altitude stream, or with a hysteresis gain of 0, is a genuinely
+  // flat activity and the device's 0 is honoured (source stays 'device').
+  if (deviceGain === 0 && hasAltitudeStream && hystGainM > 0) {
+    return { gainM: hystGainM, lossM: hystLossM, source: 'computed' }
+  }
+  return {
+    gainM: deviceGain,
+    lossM: activity.deviceElevationLossM ?? 0,
+    source: 'device',
+  }
+}
+
 export interface AnalyzeOptions {
   maxHR?: number
   elevationThresholdM?: number
@@ -276,22 +309,31 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
     : (hr: number) => hr / maxHR
 
   const pts = activity.points
+
+  // Elevation is resolved before the <2-point guard: the device totals are
+  // activity-level scalars, independent of how many points were recorded, so
+  // a sparse track that still carries a session total_ascent should surface
+  // it. The hysteresis pass also produces gainAtPoint, which splits[] needs.
+  const { gainAtPoint, totalGainM: hystGainM, totalLossM: hystLossM } =
+    elevationHysteresis(pts, elevationThresholdM)
+  const hasAltitudeStream = pts.some(p => p.elevation != null)
+  const { gainM: elevationGainM, lossM: elevationLossM, source: elevationSource } =
+    resolveElevation(activity, hystGainM, hystLossM, hasAltitudeStream)
+
   if (pts.length < 2) {
     return {
       distanceM: 0, distanceSource: 'computed',
       deviceDistanceM: resolveDeviceDistanceM(activity.deviceDistanceM, 0),
       elapsedTimeSec: 0, movingTimeSec: 0,
       avgPaceSecPerKm: 0, bestKmPaceSecPerKm: null,
-      elevationGainM: 0, elevationLossM: 0,
+      elevationGainM: Math.round(elevationGainM), elevationLossM: Math.round(elevationLossM),
+      elevationSource,
       avgHeartRate: null, maxHeartRate: null, hrZones: null,
       avgCadence: null, splits: [],
     }
   }
 
   let movingTimeSec = 0
-
-  const { gainAtPoint, totalGainM: elevationGainM, totalLossM: elevationLossM } =
-    elevationHysteresis(pts, elevationThresholdM)
 
   // Cumulative distance series (metrics-spec.md §2.3), from the device's own
   // distance stream when the whole track carries a usable one, else summed
@@ -378,6 +420,7 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
     bestKmPaceSecPerKm: bestKmPace != null ? Math.round(bestKmPace) : null,
     elevationGainM: Math.round(elevationGainM),
     elevationLossM: Math.round(elevationLossM),
+    elevationSource,
     avgHeartRate: hasHR ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : null,
     maxHeartRate: hasHR ? Math.max(...hrValues) : null,
     hrZones: hasHR ? hrZones(hrZoneSegments, pctOfMax, zoneBoundaries) : null,

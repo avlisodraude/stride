@@ -242,11 +242,23 @@ formatDuration(3092)         // "51:32"
 | `bestKmPaceSecPerKm` | `number \| null` | Fastest 1km split |
 | `elevationGainM` | `number` | Total elevation gain in metres |
 | `elevationLossM` | `number` | Total elevation loss in metres |
+| `elevationSource` | `'device' \| 'computed'` | Whether elevation totals came from the file's own device-computed figure (FIT `session.total_ascent`/`total_descent`), or from the GPS-altitude hysteresis filter. See the note below |
 | `avgHeartRate` | `number \| null` | Average HR in bpm |
 | `maxHeartRate` | `number \| null` | Max HR in bpm |
 | `hrZones` | `HeartRateZones \| null` | Time in each HR zone (seconds) |
 | `avgCadence` | `number \| null` | Average cadence in steps/min |
 | `splits` | `Split[]` | Per-km splits |
+
+> **Elevation source and the split total.** When a FIT file carries a
+> device-computed total ascent/descent (barometric or sensor-fused), `analyze()`
+> reports that and sets `elevationSource: 'device'` — it's the figure Garmin
+> Connect and Strava agree with, and it can be *larger* than the GPS-only
+> estimate, not just smaller. In that case `sum(splits[].elevationGainM)` will
+> **not** equal `elevationGainM`: the device gives one activity-level total and
+> doesn't say how it's distributed over distance, so per-split gains keep coming
+> from the GPS-altitude hysteresis filter (the only signal that can be sliced by
+> distance). This is deliberate, not a bug — check `elevationSource` before
+> assuming the splits add up to the total. GPX and TCX are always `'computed'`.
 
 ## Support & custom work
 

@@ -44,6 +44,24 @@ export interface Activity {
    * two numbers answer different questions and are not required to agree.
    */
   deviceDistanceM?: number
+  /**
+   * The device's own total elevation gain / loss for the *whole activity*,
+   * in metres, read verbatim from FIT `session.total_ascent` /
+   * `session.total_descent` (summed across sessions in a multisport file).
+   * Undefined for GPX and TCX, and for FIT files whose session message omits
+   * the field (many watches never write it).
+   *
+   * Unlike {@link TrackPoint.distanceM}, these are **activity-level scalars**,
+   * not a per-point stream: the device reports one total for the run,
+   * computed by its barometric/fused altimeter, and does not tell us how that
+   * total is distributed over distance. They therefore cannot be attributed
+   * to individual splits — see {@link ActivityStats.elevationSource} and
+   * `docs/metrics-spec.md` §5.6. When present and trusted, the analyzer
+   * prefers them over the GPS-altitude hysteresis filter, because they are
+   * the figure Garmin Connect and Strava agree with.
+   */
+  deviceElevationGainM?: number
+  deviceElevationLossM?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +128,20 @@ export interface ActivityStats {
   elevationGainM: number
   /** Total elevation loss in metres */
   elevationLossM: number
+  /**
+   * Which source produced `elevationGainM` / `elevationLossM`: `'device'`
+   * when the file carried a trusted device-computed total (FIT
+   * `session.total_ascent`/`total_descent`), `'computed'` when it fell back
+   * to the GPS-altitude hysteresis filter (GPX and TCX always, FIT when the
+   * field is absent or a zero that contradicts an obviously climbing track).
+   *
+   * When this is `'device'`, `sum(splits[].elevationGainM)` does **not** equal
+   * `elevationGainM`: the splits are still built from the per-point hysteresis
+   * pass (the only elevation signal that can be sliced by distance), while the
+   * total is the device's activity-level scalar. This inconsistency is
+   * deliberate and documented — see `docs/metrics-spec.md` §5.6.
+   */
+  elevationSource: 'device' | 'computed'
   /** Average heart rate in bpm (null if no HR data) */
   avgHeartRate: number | null
   /** Max heart rate in bpm (null if no HR data) */

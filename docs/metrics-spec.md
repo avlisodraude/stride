@@ -361,6 +361,18 @@ For reference, the same input under the **rejected** alternatives:
 
 Chosen output: **3 m** (raw was 8 m). Direction: **down**, as it will be for essentially every real activity.
 
+### 5.6 Preferring the device's own total — and the split inconsistency it creates
+
+Step 1 of §5.3 is now implemented: when a FIT file carries a device-computed `session.total_ascent` / `total_descent`, `analyze()` reports **that** as `elevationGainM` / `elevationLossM` and sets `elevationSource: 'device'`. The hysteresis filter (steps 2–3) is the fallback, used for GPX and TCX always, and for FIT files whose session message omits the field (`elevationSource: 'computed'`). This is the preferred path precisely because the device total is barometric or sensor-fused, filtered on-device, and is the figure Garmin Connect and Strava will agree with — whereas hysteresis is a denoising of *GPS* altitude, which never saw the pressure signal.
+
+Two consequences are deliberate and must not be "fixed":
+
+- **The device total can be *larger* than the hysteresis figure, not just smaller.** §6 notes elevation "always drops or is unchanged" — that is true only of the *hysteresis fix relative to the old raw-delta sum*. Switching to the device total is a different operation: a barometric altimeter picks up rollers that GPS altitude flattens into noise, so `elevationSource: 'device'` can report *more* gain than the same activity's hysteresis pass would. Do not assume elevation only ever decreases.
+
+- **When `elevationSource === 'device'`, `sum(splits[].elevationGainM) !== elevationGainM`.** The device gives a single activity-level scalar; it does not tell us how the ascent is distributed over distance, so it **cannot** be attributed to individual splits. `splits[].elevationGainM` therefore keeps using the per-point hysteresis pass (§4.2/§5.4) — the only elevation signal that can be sliced by a distance range — while the activity total comes from the device. The parts will not sum to the whole, and that is correct: they are answering two different questions with two different instruments. **Do not** rescale the splits to force them to add up (that would fabricate a per-split distribution the device never reported), and **do not** switch the total back to the hysteresis sum to make them agree (that would throw away the better number). The `elevationSource` field is the signal that tells a consumer which regime it is in; when it reads `'device'`, per-split gains are a GPS-derived breakdown that is internally consistent with itself but not with the barometric total.
+
+  A zero-guard protects the one case where the device figure is untrustworthy: a `total_ascent` of `0` on a track that plainly climbs (a raw altitude stream is present *and* the hysteresis pass already found nonzero gain) is a device that never populated the field, not a flat run — so it falls back to `'computed'`. A `0` with no altitude stream, or with a hysteresis gain of `0`, is a genuinely flat activity and the device's `0` is honoured.
+
 ---
 
 ## 6. Which published numbers change (CHANGELOG material)

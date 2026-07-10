@@ -7,6 +7,32 @@ follows [Semantic Versioning](https://semver.org/).
 
 ### BREAKING
 
+- **FIT elevation now prefers the device's own `session.total_ascent` /
+  `total_descent` over the GPS-altitude hysteresis filter.** When a FIT file
+  carries these fields, `analyze()` reports them as
+  `elevationGainM`/`elevationLossM` and sets `elevationSource: 'device'` —
+  they're barometric/sensor-fused, filtered on-device, and the figure Garmin
+  Connect and Strava agree with (docs/metrics-spec.md §5.3 step 1, §5.6). Two
+  consequences are deliberate:
+  - **Elevation can go *up*, not only down.** The 1.0.0 hysteresis fix only
+    ever lowered gain relative to the old raw-delta sum; deferring to the
+    device is a different operation. A barometric altimeter catches rollers
+    GPS altitude flattens into noise, so `elevationSource: 'device'` can report
+    *more* gain than the hysteresis pass. On the new `climb-run.fit` fixture
+    the device reports **78 m** of ascent where the denoised GPS altitude shows
+    only **58 m**.
+  - **`sum(splits[].elevationGainM)` no longer equals `elevationGainM` when
+    `elevationSource === 'device'`.** The device gives one activity-level total
+    and doesn't say how it's distributed over distance, so per-split gains stay
+    hysteresis-derived (the only signal sliceable by distance). Check
+    `elevationSource` before assuming the splits add up.
+
+  A zero-guard keeps a bogus `total_ascent: 0` from hiding a real climb: a 0 on
+  a track whose GPS altitude clearly climbs falls back to `'computed'`; a 0 on
+  a genuinely flat track is honoured. GPX and TCX have no such field and are
+  always `'computed'`. **`sample-run.fit` is unaffected — it carries no
+  `total_ascent`, so it stays `'computed'` and its `elevationGainM` is
+  unchanged at `0`.**
 - **`DEFAULT_ELEVATION_THRESHOLD_M` changes from 3m to 8m.** The 1.0.0
   hysteresis fix picked 3m as a provenance-agnostic compromise, sitting at
   the top of the *barometric* noise band (docs/metrics-spec.md §5.2). But
@@ -35,6 +61,16 @@ follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`ActivityStats.elevationSource: 'device' | 'computed'`** — reports whether
+  the elevation totals came from the device's own session figure or the
+  GPS-altitude hysteresis fallback. Additive; the signal a consumer checks
+  before assuming per-split gains sum to `elevationGainM`.
+- **`Activity.deviceElevationGainM?: number` / `Activity.deviceElevationLossM?:
+  number`** — the device's own total ascent/descent for the whole activity,
+  read from FIT `session.total_ascent`/`total_descent` (summed across sessions
+  in a multisport file). Activity-level scalars, not a per-point stream, so
+  they cannot be attributed to individual splits. Undefined for GPX and TCX,
+  and for FIT files whose session omits the field.
 - **`ActivityStats.distanceSource: 'device' | 'computed'`** — reports which
   path produced the distance, splits and best-km series so a consumer can
   tell device-reported distance from the haversine fallback. Additive.

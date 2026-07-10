@@ -234,7 +234,25 @@ export function parseFit(bytes: Uint8Array): Activity {
     ? sessionDistances.reduce((a, b) => a + b, 0)
     : undefined
 
-  return { name, type, startTime, points, format: 'fit', deviceDistanceM }
+  // session.totalAscent / totalDescent are the device's own barometric/fused
+  // elevation totals for that session (camelCase in the SDK's output, uint16
+  // metres). Sum across sessions the same way as totalDistance for multisport
+  // files. Left undefined when no session reports the field — many watches
+  // never write it, in which case the analyzer falls back to the GPS-altitude
+  // hysteresis filter.
+  const sumSessionField = (field: 'totalAscent' | 'totalDescent'): number | undefined => {
+    const values = sessions
+      .map(s => s[field] as number | undefined)
+      .filter((v): v is number => v != null && !isNaN(v))
+    return values.length > 0 ? values.reduce((a, b) => a + b, 0) : undefined
+  }
+  const deviceElevationGainM = sumSessionField('totalAscent')
+  const deviceElevationLossM = sumSessionField('totalDescent')
+
+  return {
+    name, type, startTime, points, format: 'fit',
+    deviceDistanceM, deviceElevationGainM, deviceElevationLossM,
+  }
 }
 
 // ---------------------------------------------------------------------------

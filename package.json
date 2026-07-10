@@ -85,6 +85,7 @@
     "pretest": "npm run build",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
     "sample:fit": "node scripts/make-sample-fit.mjs test/fixtures/sample-run.fit",
+    "sample:climb": "node scripts/make-climb-fit.mjs test/fixtures/climb-run.fit",
     "lint": "eslint src",
     "prepare": "husky",
     "release": "npm run build && npm publish --access public"

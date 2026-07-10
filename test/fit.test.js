@@ -58,8 +58,10 @@ describe('FIT parsing', () => {
     // never confirms a climb against the 8m GPS-derived default threshold
     // (metrics-spec.md §5.3) — correctly so, per the hysteresis filter.
     // Positive-case coverage for real climbs lives in gpx.test.js's
-    // gpx-climb fixture.
+    // gpx-climb fixture. It also carries no session total_ascent, so it stays
+    // on the computed path (device-elevation coverage: elevation-source.test.js).
     expect(stats.elevationGainM).toBe(0)
+    expect(stats.elevationSource).toBe('computed')
     expect(stats.splits.length).toBeGreaterThanOrEqual(1)
   })
 })
