@@ -114,6 +114,18 @@ come first.
 - **`AnalyzeOptions.pauseThresholdMps`** — the speed below which a segment
   counts as paused rather than moving (default 0.3, the previously hardcoded
   value).
+- **Validation of `maxHR` and `restingHR`.** Previously `maxHR: 0`, a
+  negative `maxHR`, `NaN`, or (for `zoneModel: { type: 'reserve' }`) an
+  omitted, negative, or out-of-order `restingHR` all divided-by-zero or
+  inverted the zone-percentage formula silently, dumping every sample into
+  `z1` or `z5` — a confident, wrong answer, not a crash. Both are now
+  validated the same way `zoneModel.boundaries` already was: `maxHR` must be
+  finite and within a plausible physiological range (60–220 bpm); for the
+  `'reserve'` model, `restingHR` must be finite, non-negative, and less than
+  `maxHR`. Anything else throws a clear error naming the field and the
+  offending value. Heart rate *samples* found in a file are never validated
+  or clamped — a corrupt 300 bpm point is a data-quality issue, not a caller
+  error, and is left as-is.
 - **Browser export condition** — bundlers resolve a browser-safe entry
   (`dist/index.browser.js`, with its own type declarations) that never
   references `fs`. `parseFile` is absent from the browser build.

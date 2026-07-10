@@ -36,6 +36,50 @@ function validateZoneBoundaries(boundaries: [number, number, number, number]): v
   }
 }
 
+// Plausible range for a *maximum* heart rate, in bpm — not a formula, just a
+// screen against non-finite/nonsensical caller input (0, negative, NaN, a
+// resting HR typo'd into the maxHR slot). Upper bound mirrors the ubiquitous
+// age-predicted-max estimate ("220 minus your age", as published by the
+// American Heart Association's target-heart-rate guidance): at age 0 that
+// formula's own ceiling is 220, and this library has no infant runners.
+// Lower bound is deliberately generous rather than tuned to "typical" — it
+// only needs to admit every real maxHR, including heavily beta-blocked or
+// elderly athletes with pronounced chronotropic incompetence during
+// exercise, while still rejecting values with no physiological plausibility
+// at all.
+export const MIN_PLAUSIBLE_MAX_HR_BPM = 60
+export const MAX_PLAUSIBLE_MAX_HR_BPM = 220
+
+// Validates the two numbers HR zone percentages are computed *against* —
+// distinct from validateZoneBoundaries, which validates the percentages
+// themselves. Without this, maxHR: 0, NaN, or a negative value, and (for the
+// 'reserve' model) a missing/negative/non-finite restingHR or one >= maxHR,
+// each divide-by-zero or invert the pct formula silently and dump every
+// segment into z1 or z5 — a confident, wrong answer, not a crash. A plain-JS
+// caller gets no type error for an omitted restingHR (HrZoneModel's
+// 'reserve' variant types it as required, but that's a compile-time promise
+// only), so this is the only backstop.
+function validateHeartRateInputs(maxHR: number, zoneModel: HrZoneModel): void {
+  if (!Number.isFinite(maxHR) || maxHR < MIN_PLAUSIBLE_MAX_HR_BPM || maxHR > MAX_PLAUSIBLE_MAX_HR_BPM) {
+    throw new Error(
+      `Invalid maxHR: expected a finite number between ${MIN_PLAUSIBLE_MAX_HR_BPM} and ${MAX_PLAUSIBLE_MAX_HR_BPM} bpm (got ${maxHR}).`
+    )
+  }
+  if (zoneModel.type === 'reserve') {
+    const { restingHR } = zoneModel
+    if (restingHR == null || !Number.isFinite(restingHR) || restingHR < 0) {
+      throw new Error(
+        `Invalid restingHR: expected a finite, non-negative number (got ${restingHR}).`
+      )
+    }
+    if (restingHR >= maxHR) {
+      throw new Error(
+        `Invalid restingHR: must be less than maxHR (got restingHR ${restingHR}, maxHR ${maxHR}).`
+      )
+    }
+  }
+}
+
 // Each entry is a segment: `weightSec` is the duration to attribute to the
 // zone of `heartRate` (the segment's *ending* sample — see metrics-spec.md
 // §1.2). A segment with no attributable duration (missing/non-monotonic
@@ -303,6 +347,7 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
 
   const zoneBoundaries = zoneModel.boundaries ?? DEFAULT_ZONE_BOUNDARIES
   validateZoneBoundaries(zoneBoundaries)
+  validateHeartRateInputs(maxHR, zoneModel)
 
   const pctOfMax = zoneModel.type === 'reserve'
     ? (hr: number) => (hr - zoneModel.restingHR) / (maxHR - zoneModel.restingHR)

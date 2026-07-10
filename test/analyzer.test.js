@@ -139,6 +139,49 @@ describe('configurable HR zone model (zoneModel) and pause threshold (pauseThres
     })).toThrow(/strictly between 0 and 1/)
   })
 
+  describe('invalid maxHR/restingHR throw instead of silently producing nonsense zones', () => {
+    const points = [
+      pt({ timestamp: tsAt(0), heartRate: 140 }),
+      pt({ timestamp: tsAt(10), heartRate: 150 }),
+    ]
+
+    test('maxHR: 0 throws instead of dividing by zero into z5', () => {
+      expect(() => analyze({ points, format: 'gpx' }, { maxHR: 0 }))
+        .toThrow(/Invalid maxHR.*between 60 and 220.*got 0/)
+    })
+
+    test('maxHR: NaN throws instead of comparing NaN into z5', () => {
+      expect(() => analyze({ points, format: 'gpx' }, { maxHR: NaN }))
+        .toThrow(/Invalid maxHR.*between 60 and 220.*got NaN/)
+    })
+
+    test('maxHR: -190 throws instead of inverting the pct formula into z1', () => {
+      expect(() => analyze({ points, format: 'gpx' }, { maxHR: -190 }))
+        .toThrow(/Invalid maxHR.*between 60 and 220.*got -190/)
+    })
+
+    test('reserve restingHR === maxHR throws instead of dividing by zero into z1', () => {
+      expect(() => analyze({ points, format: 'gpx' }, {
+        maxHR: 190,
+        zoneModel: { type: 'reserve', restingHR: 190 },
+      })).toThrow(/Invalid restingHR.*must be less than maxHR/)
+    })
+
+    test('reserve restingHR >= maxHR throws instead of a negative-denominator pct into z5', () => {
+      expect(() => analyze({ points, format: 'gpx' }, {
+        maxHR: 190,
+        zoneModel: { type: 'reserve', restingHR: 220 },
+      })).toThrow(/Invalid restingHR.*must be less than maxHR/)
+    })
+
+    test('reserve with restingHR omitted throws instead of NaN-ing every sample into z5', () => {
+      expect(() => analyze({ points, format: 'gpx' }, {
+        maxHR: 190,
+        zoneModel: { type: 'reserve' },
+      })).toThrow(/Invalid restingHR.*finite, non-negative number.*got undefined/)
+    })
+  })
+
   test('pauseThresholdMps reclassifies a borderline-speed segment as paused', () => {
     // Device distance stream (not GPS) so segment speed is exact: segment
     // 0->1 covers 0.4m in 1s (0.4 m/s), segment 1->2 covers 10m in 10s (1.0 m/s).
