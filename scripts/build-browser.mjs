@@ -12,7 +12,14 @@
 import esbuild from 'esbuild'
 import path from 'path'
 
-const outfile = process.argv[2] ?? 'dist/stride.browser.js'
+// Emitted outside dist/ on purpose. This is a self-contained IIFE for
+// stride.alosha.dev/demo: it inlines @garmin/fitsdk and fast-xml-parser and
+// weighs ~476 kB minified. It is a site asset, not a package asset — no
+// consumer can import it (it is absent from the `exports` map), so shipping it
+// inside dist/ would add ~97 kB gzipped to every npm install for nothing.
+// The ESM browser build that the `browser` export condition resolves to is a
+// different file, dist/index.browser.js, emitted by tsup.
+const outfile = process.argv[2] ?? 'demo/stride.browser.js'
 
 const browserFileInput = {
   name: 'browser-file-input',

@@ -3,3 +3,17 @@ dist/
 .env
 *.env.local
 coverage/
+
+# npm pack output
+*.tgz
+
+# Local AI-tooling state (CLAUDE.md and repomix.config.json stay tracked)
+.claude/
+repomix-output.xml
+
+# Real watch exports contain home coordinates, routines, device serials
+test/fixtures/real/*
+!test/fixtures/real/README.md
+
+# Generated demo bundle for stride.alosha.dev (site asset, not shipped)
+demo/
