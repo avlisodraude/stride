@@ -75,9 +75,12 @@ describe('formatStats', () => {
     expect(output).toContain(`Max HR:        ${stats.maxHeartRate} bpm`)
     expect(output).toContain(`Avg cadence:   ${stats.avgCadence} spm`)
 
+    // No "↑Xm" on either split: the fixture's altitude stream is flat
+    // enough that the 8m GPS-derived default threshold (metrics-spec.md
+    // §5.3) confirms no climb, and cli-lib omits the segment when gain is 0.
     expect(output).toContain('Splits:')
-    expect(output).toContain('km  1  5:03/km  ↑6m  HR 131bpm')
-    expect(output).toContain('km  2  5:03/km  ↑6m  HR 154bpm')
+    expect(output).toContain('km  1  5:03/km  HR 131bpm')
+    expect(output).toContain('km  2  5:03/km  HR 154bpm')
   })
 
   test('--imperial converts distance and pace units in the stats block', () => {

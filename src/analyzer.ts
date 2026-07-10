@@ -77,12 +77,14 @@ function hrZones(
 // filtered on-device. The parser does not currently surface that field, so
 // this filter is the fallback used for every source today. Out of scope here.
 
-// Default threshold per spec §5.3: 3m sits at the top of the barometric noise
-// band while removing the bulk of per-fix GPS jitter. It is a deliberately
-// conservative default given the library cannot always tell whether a source
-// is barometric or GPS-only; expose it as a parameter so a caller who knows
-// their data is GPS-only can raise it toward Strava's 10m.
-export const DEFAULT_ELEVATION_THRESHOLD_M = 3
+// Default threshold per spec §5.3: every format this library parses is
+// GPS-derived (GPX always; FIT usually, absent a device total_ascent — see
+// the note above), so the 2-3m *barometric* threshold does not apply here.
+// 8m sits within the GPS-derived band authoritative sources actually
+// recommend (Strava ~10m for non-barometric activities, GPS Visualizer
+// 6-9m). Expose it as a parameter so a caller who knows their source is
+// barometric can lower it toward that 2-3m figure instead.
+export const DEFAULT_ELEVATION_THRESHOLD_M = 8
 
 // Accumulates confirmed climbs/descents only once the *cumulative* rise from
 // the last confirmed reference point clears `thresholdM`, rejecting

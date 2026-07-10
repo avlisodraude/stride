@@ -42,7 +42,12 @@ describe('TCX parsing', () => {
     expect(stats.avgHeartRate).not.toBeNull()
     expect(stats.avgCadence).not.toBeNull()
     expect(stats.hrZones).not.toBeNull()
-    expect(stats.elevationGainM).toBeGreaterThan(0)
+    // This fixture's altitude stream is essentially flat (2-14m range) and
+    // never confirms a climb against the 8m GPS-derived default threshold
+    // (metrics-spec.md §5.3) — correctly so, per the hysteresis filter.
+    // Positive-case coverage for real climbs lives in gpx.test.js's
+    // gpx-climb fixture.
+    expect(stats.elevationGainM).toBe(0)
     expect(stats.splits.length).toBeGreaterThanOrEqual(1)
   })
 })

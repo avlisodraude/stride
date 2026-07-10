@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="stride-test">
+  <metadata>
+    <name>Hill Climb</name>
+  </metadata>
+  <trk>
+    <name>Hill Climb</name>
+    <type>hiking</type>
+    <trkseg>
+      <trkpt lat="45.500000" lon="9.500000">
+        <ele>100</ele>
+        <time>2026-01-03T06:00:00Z</time>
+      </trkpt>
+      <trkpt lat="45.500100" lon="9.500050">
+        <ele>103</ele>
+        <time>2026-01-03T06:00:05Z</time>
+      </trkpt>
+      <trkpt lat="45.500200" lon="9.500100">
+        <ele>97</ele>
+        <time>2026-01-03T06:00:10Z</time>
+      </trkpt>
+      <trkpt lat="45.500300" lon="9.500150">
+        <ele>102</ele>
+        <time>2026-01-03T06:00:15Z</time>
+      </trkpt>
+      <trkpt lat="45.500400" lon="9.500200">
+        <ele>105</ele>
+        <time>2026-01-03T06:00:20Z</time>
+      </trkpt>
+      <trkpt lat="45.500500" lon="9.500250">
+        <ele>109</ele>
+        <time>2026-01-03T06:00:25Z</time>
+      </trkpt>
+      <trkpt lat="45.500600" lon="9.500300">
+        <ele>115</ele>
+        <time>2026-01-03T06:00:30Z</time>
+      </trkpt>
+      <trkpt lat="45.500700" lon="9.500350">
+        <ele>119</ele>
+        <time>2026-01-03T06:00:35Z</time>
+      </trkpt>
+      <trkpt lat="45.500800" lon="9.500400">
+        <ele>128</ele>
+        <time>2026-01-03T06:00:40Z</time>
+      </trkpt>
+      <trkpt lat="45.500900" lon="9.500450">
+        <ele>130</ele>
+        <time>2026-01-03T06:00:45Z</time>
+      </trkpt>
+      <trkpt lat="45.501000" lon="9.500500">
+        <ele>118</ele>
+        <time>2026-01-03T06:00:50Z</time>
+      </trkpt>
+      <trkpt lat="45.501100" lon="9.500550">
+        <ele>112</ele>
+        <time>2026-01-03T06:00:55Z</time>
+      </trkpt>
+      <trkpt lat="45.501200" lon="9.500600">
+        <ele>105</ele>
+        <time>2026-01-03T06:01:00Z</time>
+      </trkpt>
+      <trkpt lat="45.501300" lon="9.500650">
+        <ele>108</ele>
+        <time>2026-01-03T06:01:05Z</time>
+      </trkpt>
+      <trkpt lat="45.501400" lon="9.500700">
+        <ele>100</ele>
+        <time>2026-01-03T06:01:10Z</time>
+      </trkpt>
+      <trkpt lat="45.501500" lon="9.500750">
+        <ele>106</ele>
+        <time>2026-01-03T06:01:15Z</time>
+      </trkpt>
+      <trkpt lat="45.501600" lon="9.500800">
+        <ele>101</ele>
+        <time>2026-01-03T06:01:20Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

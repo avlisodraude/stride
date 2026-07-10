@@ -7,6 +7,20 @@ follows [Semantic Versioning](https://semver.org/).
 
 ### BREAKING
 
+- **`DEFAULT_ELEVATION_THRESHOLD_M` changes from 3m to 8m.** The 1.0.0
+  hysteresis fix picked 3m as a provenance-agnostic compromise, sitting at
+  the top of the *barometric* noise band (docs/metrics-spec.md §5.2). But
+  every format this library parses is GPS-derived altitude — GPX always,
+  FIT usually, absent a device `total_ascent` — for which authoritative
+  sources recommend a materially larger threshold (Strava ~10m, GPS
+  Visualizer 6-9m). 3m barely filtered GPS-grade noise (±3-5m per fix).
+  `elevationGainM`/`elevationLossM` drop further, especially on flat or
+  gently-rolling GPS-only tracks, where confirmed climbs are now rarer.
+  Callers who know their source is barometric can pass a lower
+  `elevationThresholdM` (toward 2-3m) to `analyze()`. See
+  docs/metrics-spec.md §5.3 for the full rationale and a documented
+  limitation (a climb's trailing, still-unconfirmed rise is never
+  credited).
 - **`distanceM` now prefers the device's own distance stream over summed
   haversine.** When a FIT (`record.distance`/`enhancedDistance`) or TCX
   (`<DistanceMeters>`) file carries a usable cumulative-distance stream —

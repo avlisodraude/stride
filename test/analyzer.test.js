@@ -166,9 +166,18 @@ describe('§5 elevation gain/loss — hysteresis filter', () => {
     }))
   }
 
-  test('§5.5 worked example — default T=3m gives 3m gain (raw would be 8m)', () => {
-    const stats = analyze({ points: elevationPoints(), format: 'gpx' })
+  test('§5.5 worked example — T=3m gives 3m gain (raw would be 8m)', () => {
+    // T=3m is the worked example's own threshold (§5.5), not the library
+    // default (§5.3 default is 8m, tuned for GPS-derived altitude) — passed
+    // explicitly so this normative fixture stays pinned regardless of default.
+    const stats = analyze({ points: elevationPoints(), format: 'gpx' }, { elevationThresholdM: 3 })
     expect(stats.elevationGainM).toBe(3)
+    expect(stats.elevationLossM).toBe(0)
+  })
+
+  test('§5.3 default is now T=8m — the §5.5 fixture (max 5m from ref) clears nothing', () => {
+    const stats = analyze({ points: elevationPoints(), format: 'gpx' })
+    expect(stats.elevationGainM).toBe(0)
     expect(stats.elevationLossM).toBe(0)
   })
 
@@ -185,7 +194,7 @@ describe('§5 elevation gain/loss — hysteresis filter', () => {
       timestamp: tsAt(i),
       elevation,
     }))
-    const stats = analyze({ points, format: 'gpx' })
+    const stats = analyze({ points, format: 'gpx' }, { elevationThresholdM: 3 })
     expect(stats.elevationGainM).toBe(0)
     expect(stats.elevationLossM).toBe(3)
   })
