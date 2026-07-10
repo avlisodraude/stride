@@ -27,7 +27,7 @@ export default defineConfig([
   {
     entry: { 'index.browser': 'src/index.browser.ts' },
     format: ['esm'],
-    dts: false,
+    dts: true,
     sourcemap: true,
     target: 'es2020',
     platform: 'browser',
