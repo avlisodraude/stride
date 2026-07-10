@@ -36,7 +36,7 @@
   "author": "Eduardo Silva Navarrete <avlis_odraude@hotmail.com>",
   "type": "module",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "exports": {
     ".": {
