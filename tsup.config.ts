@@ -11,6 +11,14 @@ export default defineConfig([
     external: ['chart.js'],
   },
   {
+    entry: ['src/charts.ts'],
+    format: ['esm', 'cjs'],
+    dts: true,
+    sourcemap: true,
+    target: 'node18',
+    external: ['chart.js'],
+  },
+  {
     entry: ['src/cli.ts'],
     format: ['esm'],
     banner: { js: '#!/usr/bin/env node' },

@@ -9,15 +9,14 @@
  */
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { parse, analyze } from '../dist/index.js'
 import {
-  parse,
-  analyze,
   paceChartConfig,
   elevationChartConfig,
   heartRateChartConfig,
   hrZonesChartConfig,
   splitsChartConfig,
-} from '../dist/index.js'
+} from '../dist/charts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixturePath = join(here, 'fixtures', 'sample-run.tcx')
