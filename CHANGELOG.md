@@ -84,6 +84,12 @@ come first.
   elevationThresholdM: 2 })`. The positional form
   `analyze(activity, maxHR, elevationThresholdM)` still works, is marked
   `@deprecated`, and will be removed in 3.0.0.
+- **`ChartOptions` loses its `charts` and `maxHR` fields.** Neither was ever
+  read by any chart builder — they were documented options with no behavior
+  behind them, so passing `{ maxHR: 185 }` to a builder was a silent no-op
+  (HR zones are configured on `analyze()`, whose output the builders
+  consume). TypeScript consumers passing them get a compile error pointing
+  at code that was already doing nothing; `units` is unchanged.
 
 ### Added
 
@@ -126,6 +132,19 @@ come first.
   offending value. Heart rate *samples* found in a file are never validated
   or clamped — a corrupt 300 bpm point is a data-quality issue, not a caller
   error, and is left as-is.
+- **CLI flags: `--json`, `--max-hr`, `--elevation-threshold`.** `--json`
+  prints the raw `ActivityStats` object (the same documented schema
+  `analyze()` returns) for jq/scripting; the other two expose the
+  corresponding `analyze()` options, which were previously reachable only
+  from the library. Unknown `--flags` and non-numeric values now error
+  clearly instead of being silently ignored.
+- **CI test workflow** — lint + tests run on every push and pull request,
+  across Node 18, 20 and 22, so the `engines` claim is verified rather than
+  asserted.
+- **Real-fixture invariant harness** — any real watch export dropped into
+  `test/fixtures/real/` is automatically checked against the invariants that
+  must hold for any valid activity (no NaN, split sums, source labels,
+  `deviceDistanceM >= distanceM`). See `test/fixtures/real/README.md`.
 - **Browser export condition** — bundlers resolve a browser-safe entry
   (`dist/index.browser.js`, with its own type declarations) that never
   references `fs`. `parseFile` is absent from the browser build.
@@ -147,6 +166,23 @@ come first.
 - `parse()` gives a real error (with a truncated input preview) when a short
   invalid string is mistaken for a file path, instead of a confusing
   `ENOENT`.
+- The CLI labels the trailing partial split the same way the charts do
+  (`km 2  5:03/km  (0.98 km)`) instead of presenting it as a full kilometre,
+  and `--imperial` now converts elevation to feet — previously pace and
+  distance converted but elevation stayed in metres.
+- Malformed GPX/TCX values (a non-numeric `<ele>`/`<hr>`/`<cad>`/
+  `<AltitudeMeters>`/`<RunCadence>`, an empty `<HeartRateBpm/>`, an
+  unparseable timestamp) are dropped at the parser boundary instead of
+  becoming `NaN` (or a fabricated 0 bpm) that passed every null-check and
+  silently corrupted `avgHeartRate`, `maxHeartRate` and `hrZones`.
+- `formatDuration` carries fractional seconds into minutes: `59.6` formats
+  as `1:00`, not `0:60`.
+- `heartRateChartConfig` plots heart rate against distance (the same series
+  as `stats.distanceM`) instead of sample index. Smart-recording watches
+  sample hard efforts densely and steady running sparsely, so the old index
+  axis stretched hard sections and compressed easy ones — distorting exactly
+  the feature the chart exists to show. It also accepts `opts.units` now,
+  like the other builders.
 
 ### Which numbers move
 

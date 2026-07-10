@@ -14,11 +14,25 @@ switch (action.kind) {
     process.exit(1)
     break
 
+  case 'invalidOption':
+    console.error(action.message)
+    process.exit(1)
+    break
+
   case 'analyze':
     try {
       const activity = parse(action.filePath)
-      const stats = analyze(activity)
-      console.log(formatStats(activity.name ?? action.filePath, stats, action.units))
+      const stats = analyze(activity, {
+        maxHR: action.maxHR,
+        elevationThresholdM: action.elevationThresholdM,
+      })
+      if (action.json) {
+        // Exactly the ActivityStats object analyze() returns — a stable,
+        // documented schema for jq / scripts, not a bespoke CLI shape.
+        console.log(JSON.stringify(stats, null, 2))
+      } else {
+        console.log(formatStats(activity.name ?? action.filePath, stats, action.units))
+      }
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : err)
       process.exit(1)

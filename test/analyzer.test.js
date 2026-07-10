@@ -6,7 +6,7 @@
  * Fixtures below are taken verbatim from docs/metrics-spec.md — they are
  * normative and must not be adjusted to match implementation output.
  */
-import { analyze } from '../dist/index.js'
+import { analyze, formatDuration } from '../dist/index.js'
 
 function pt(overrides) {
   return { lat: 0, lon: 0, ...overrides }
@@ -354,5 +354,20 @@ describe('analyze() signature — options object vs. deprecated positional args'
 
   test('omitting options/positional args entirely uses the same defaults', () => {
     expect(analyze(activity)).toEqual(analyze(activity, {}))
+  })
+})
+
+describe('formatDuration — fractional seconds carry into minutes', () => {
+  test('59.6s rounds to 1:00, not 0:60', () => {
+    expect(formatDuration(59.6)).toBe('1:00')
+  })
+
+  test('3599.7s rounds to 1:00:00, not 59:60', () => {
+    expect(formatDuration(3599.7)).toBe('1:00:00')
+  })
+
+  test('integer inputs are unchanged', () => {
+    expect(formatDuration(3092)).toBe('51:32')
+    expect(formatDuration(59)).toBe('0:59')
   })
 })

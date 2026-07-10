@@ -14,6 +14,26 @@ function asArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v]
 }
 
+// Coerce a parsed-XML value to a finite number, or undefined. Malformed
+// markup (a non-numeric string, an unexpected element shape that coerces to
+// NaN) must be dropped at the boundary: NaN passes every `!= null` guard
+// downstream and silently corrupts avgHeartRate / maxHeartRate / hrZones.
+function finiteNumber(v: unknown): number | undefined {
+  // Empty elements (<HeartRateBpm/>) parse to '' and would coerce to 0 —
+  // a fabricated reading, not a recorded one — so they are dropped too.
+  if (v == null || (typeof v === 'string' && v.trim() === '')) return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+// Same boundary rule for timestamps: an unparseable time string yields an
+// Invalid Date whose getTime() is NaN, which would poison every duration
+// computed from it.
+function validDate(v: unknown): Date | undefined {
+  const d = new Date(v as string | number | Date)
+  return isNaN(d.getTime()) ? undefined : d
+}
+
 export function parseGpx(xml: string): Activity {
   const doc = xmlParser.parse(xml)
   const gpx = doc.gpx
@@ -38,8 +58,9 @@ export function parseGpx(xml: string): Activity {
 
         const point: TrackPoint = { lat, lon }
 
-        if (pt.ele != null) point.elevation = parseFloat(pt.ele)
-        if (pt.time) point.timestamp = new Date(pt.time)
+        const ele = finiteNumber(pt.ele)
+        if (pt.ele != null && ele != null) point.elevation = ele
+        if (pt.time) point.timestamp = validDate(pt.time)
 
         // Garmin extensions (heart rate + cadence)
         const ext = pt.extensions
@@ -55,8 +76,10 @@ export function parseGpx(xml: string): Activity {
             const cad =
               tpx['gpxtpx:cad'] ?? tpx['ns3:cad'] ?? tpx.cad
 
-            if (hr != null) point.heartRate = parseInt(hr)
-            if (cad != null) point.cadence = parseInt(cad) * 2 // Garmin stores per-foot cadence
+            const hrNum = finiteNumber(hr)
+            if (hrNum != null) point.heartRate = Math.round(hrNum)
+            const cadNum = finiteNumber(cad)
+            if (cadNum != null) point.cadence = Math.round(cadNum) * 2 // Garmin stores per-foot cadence
           }
         }
 
@@ -109,8 +132,9 @@ export function parseTcx(xml: string): Activity {
 
           const point: TrackPoint = { lat, lon }
 
-          if (tp.AltitudeMeters != null) point.elevation = Number(tp.AltitudeMeters)
-          if (tp.Time) point.timestamp = new Date(tp.Time)
+          const tcxEle = finiteNumber(tp.AltitudeMeters)
+          if (tp.AltitudeMeters != null && tcxEle != null) point.elevation = tcxEle
+          if (tp.Time) point.timestamp = validDate(tp.Time)
 
           // <DistanceMeters> is cumulative distance from the activity start.
           if (tp.DistanceMeters != null) {
@@ -119,17 +143,17 @@ export function parseTcx(xml: string): Activity {
           }
 
           // <HeartRateBpm><Value>142</Value></HeartRateBpm>
-          const hr = tp.HeartRateBpm?.Value ?? tp.HeartRateBpm
-          if (hr != null) point.heartRate = Number(hr)
+          const hr = finiteNumber(tp.HeartRateBpm?.Value ?? tp.HeartRateBpm)
+          if (hr != null) point.heartRate = hr
 
           // Garmin activity extension (namespaced ns3: or bare):
           // <Extensions><TPX><RunCadence>85</RunCadence></TPX></Extensions>
           const ext = tp.Extensions
           if (ext) {
             const tpx = ext['ns3:TPX'] ?? ext.TPX
-            const cad = tpx?.['ns3:RunCadence'] ?? tpx?.RunCadence
+            const cad = finiteNumber(tpx?.['ns3:RunCadence'] ?? tpx?.RunCadence)
             // TCX RunCadence is per-foot RPM; double to steps/min (matches GPX/FIT).
-            if (cad != null) point.cadence = Math.round(Number(cad) * 2)
+            if (cad != null) point.cadence = Math.round(cad * 2)
           }
 
           points.push(point)
@@ -138,7 +162,7 @@ export function parseTcx(xml: string): Activity {
     }
   }
 
-  const startTime = first?.Id ? new Date(first.Id) : points[0]?.timestamp
+  const startTime = (first?.Id ? validDate(first.Id) : undefined) ?? points[0]?.timestamp
 
   return { type, startTime, points, format: 'tcx', deviceDistanceM }
 }

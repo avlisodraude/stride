@@ -177,6 +177,16 @@ npx stride analyze my-run.fit
 npx stride analyze my-run.fit --imperial
 ```
 
+Flags: `--imperial` for miles/feet/min-per-mile; `--max-hr 185` and
+`--elevation-threshold 2` expose the corresponding `analyze()` options; and
+`--json` prints the raw `ActivityStats` object — the same documented schema
+the library returns — for scripting:
+
+```bash
+npx stride analyze my-run.fit --json | jq '.avgPaceSecPerKm'
+npx stride analyze my-run.fit --max-hr 185 --json | jq '.hrZones'
+```
+
 Output (real output for the repo's `test/fixtures/sample-run.tcx`):
 
 ```
@@ -195,7 +205,7 @@ Output (real output for the repo's `test/fixtures/sample-run.tcx`):
 
   Splits:
     km  1  5:03/km  HR 131bpm
-    km  2  5:03/km  HR 154bpm
+    km  2  5:03/km  (0.98 km)  HR 154bpm
 ```
 
 ## API
@@ -288,7 +298,7 @@ Requires the optional `chart.js` peer to render (and for the
 |---|---|---|
 | `paceChartConfig(activity, stats, opts?)` | Line | Trailing partial split labelled distinctly (`km 2 (0.98 km)`) |
 | `elevationChartConfig(activity, stats, opts?)` | Line | x-axis uses the same distance series as `stats.distanceM` |
-| `heartRateChartConfig(activity, stats)` | Line | |
+| `heartRateChartConfig(activity, stats, opts?)` | Line | x-axis uses the same distance series as `stats.distanceM` |
 | `hrZonesChartConfig(stats)` | Doughnut | Never throws — renders a labelled empty chart when there's no HR data |
 | `splitsChartConfig(stats, opts?)` | Bar | Partial split's bar is faded as well as labelled |
 

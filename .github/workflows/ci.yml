@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # One Node version failing shouldn't hide results from the others —
+      # the whole point of the matrix is proving the `engines` claim
+      # (>= 18) on every major we support.
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+
+    name: Node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `pretest` runs the full build (tsup + browser bundle), so this also
+      # verifies the package builds on every supported Node major.
+      - name: Test
+        run: npm test

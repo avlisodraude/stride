@@ -180,13 +180,10 @@ export interface Split {
 // Chart options
 // ---------------------------------------------------------------------------
 
+/** The five chart builders exported from `@alosha/stride/charts`. */
 export type ChartType = 'pace' | 'elevation' | 'heartRate' | 'hrZones' | 'splits'
 
 export interface ChartOptions {
-  /** Which charts to render. Default: all available based on data */
-  charts?: ChartType[]
   /** Unit system. Default: 'metric' */
   units?: 'metric' | 'imperial'
-  /** Max HR for zone calculation. Default: 190 */
-  maxHR?: number
 }

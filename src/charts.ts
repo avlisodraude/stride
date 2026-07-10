@@ -17,6 +17,18 @@ import type { ChartConfiguration } from 'chart.js'
 import { formatPace, formatDuration } from './analyzer.js'
 import { cumulativeDistances } from './geo.js'
 
+// Indices for downsampling a point series, always including the final point.
+// A plain `for (i = 0; i < n; i += step)` loop stops at the last multiple of
+// `step`, silently truncating up to `step - 1` points from the end: a 4416-point
+// run at step 22 ends its x-axis at 12.3 km for a 12.4 km activity. The chart
+// must end where the run ended.
+function sampleIndices(length: number, step: number): number[] {
+  const idx: number[] = []
+  for (let i = 0; i < length; i += step) idx.push(i)
+  if (length > 0 && idx[idx.length - 1] !== length - 1) idx.push(length - 1)
+  return idx
+}
+
 const GREEN = 'rgba(34,197,94,1)'
 const GREEN_FILL = 'rgba(34,197,94,0.15)'
 const BLUE = 'rgba(59,130,246,1)'
@@ -120,7 +132,7 @@ export function elevationChartConfig(
 
   const labels: string[] = []
   const elevData: number[] = []
-  for (let i = 0; i < pts.length; i += step) {
+  for (const i of sampleIndices(pts.length, step)) {
     const distKm = cumDist[i] / 1000
     labels.push(units === 'imperial'
       ? `${(distKm * 0.621371).toFixed(1)} mi`
@@ -164,19 +176,44 @@ export function elevationChartConfig(
 
 export function heartRateChartConfig(
   activity: Activity,
-  _stats: ActivityStats,
+  stats: ActivityStats,
+  opts: ChartOptions = {}
 ): ChartConfiguration {
+  const units = opts.units ?? 'metric'
+
+  // Downsample to max 200 points for performance
   const pts = activity.points.filter(p => p.heartRate != null)
   const step = Math.max(1, Math.floor(pts.length / 200))
-  const sampled = pts.filter((_, i) => i % step === 0)
+
+  // x-axis is distance, not sample index. Smart-recording watches sample
+  // hard efforts densely and steady running sparsely, so a sample-index
+  // axis stretches the hard sections and compresses the easy ones —
+  // distorting exactly the feature this chart exists to show. Same source
+  // discipline as the elevation chart: follow whichever series the analyzer
+  // chose (stats.distanceSource) so the axis never disagrees with
+  // stats.distanceM.
+  const useDevice = stats.distanceSource === 'device' && pts.every(p => p.distanceM != null)
+  const cumDist = useDevice
+    ? pts.map(p => p.distanceM! - pts[0].distanceM!)
+    : cumulativeDistances(pts)
+
+  const labels: string[] = []
+  const hrData: number[] = []
+  for (const i of sampleIndices(pts.length, step)) {
+    const distKm = cumDist[i] / 1000
+    labels.push(units === 'imperial'
+      ? `${(distKm * 0.621371).toFixed(1)} mi`
+      : `${distKm.toFixed(1)} km`)
+    hrData.push(pts[i].heartRate!)
+  }
 
   return {
     type: 'line',
     data: {
-      labels: sampled.map((_, i) => `${i + 1}`),
+      labels,
       datasets: [{
         label: 'Heart rate (bpm)',
-        data: sampled.map(p => p.heartRate!),
+        data: hrData,
         borderColor: RED,
         backgroundColor: 'rgba(239,68,68,0.1)',
         fill: true,
@@ -191,7 +228,9 @@ export function heartRateChartConfig(
         legend: { display: false },
         title: { display: true, text: 'Heart rate' },
       },
-      scales: { x: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8 } },
+      },
     },
   }
 }

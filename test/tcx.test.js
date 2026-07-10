@@ -51,3 +51,49 @@ describe('TCX parsing', () => {
     expect(stats.splits.length).toBeGreaterThanOrEqual(1)
   })
 })
+
+describe('TCX parsing — malformed values are dropped, never surfaced as NaN', () => {
+  const malformedTcx = `<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase><Activities><Activity Sport="Running">
+  <Id>not-a-date</Id>
+  <Lap StartTime="also-bad">
+    <Track>
+      <Trackpoint>
+        <Time>garbage</Time>
+        <Position><LatitudeDegrees>52.3700</LatitudeDegrees><LongitudeDegrees>4.9000</LongitudeDegrees></Position>
+        <AltitudeMeters>tall</AltitudeMeters>
+        <HeartRateBpm/>
+        <Extensions><TPX><RunCadence>fast</RunCadence></TPX></Extensions>
+      </Trackpoint>
+      <Trackpoint>
+        <Time>2026-01-01T08:00:01Z</Time>
+        <Position><LatitudeDegrees>52.3701</LatitudeDegrees><LongitudeDegrees>4.9001</LongitudeDegrees></Position>
+        <AltitudeMeters>3.0</AltitudeMeters>
+        <HeartRateBpm><Value>150</Value></HeartRateBpm>
+        <Extensions><TPX><RunCadence>85</RunCadence></TPX></Extensions>
+      </Trackpoint>
+    </Track>
+  </Lap>
+</Activity></Activities></TrainingCenterDatabase>`
+
+  test('non-numeric altitude/cadence, empty HeartRateBpm and bad dates are absent, not NaN or 0', () => {
+    const activity = parse(malformedTcx)
+    expect(activity.points.length).toBe(2)
+    const [bad, good] = activity.points
+    expect(bad.elevation).toBeUndefined()
+    expect(bad.heartRate).toBeUndefined() // empty <HeartRateBpm/> must not coerce to 0
+    expect(bad.cadence).toBeUndefined()
+    expect(bad.timestamp).toBeUndefined()
+    expect(good.heartRate).toBe(150)
+    expect(good.cadence).toBe(170)
+    // Unparseable <Id> yields no startTime (points[0] has none either) —
+    // absent, rather than an Invalid Date whose getTime() is NaN.
+    expect(activity.startTime).toBeUndefined()
+  })
+
+  test('analyze() over a partially-corrupt track yields finite HR stats, not NaN', () => {
+    const stats = analyze(parse(malformedTcx))
+    expect(stats.avgHeartRate).toBe(150)
+    expect(stats.maxHeartRate).toBe(150)
+  })
+})

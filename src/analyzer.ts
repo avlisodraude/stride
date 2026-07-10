@@ -115,11 +115,14 @@ function hrZones(
 // Elevation hysteresis filter (metrics-spec.md §5)
 // ---------------------------------------------------------------------------
 
-// Preferred long-term path (§5.3 step 1): if the source file is FIT and
-// carries a device-computed session.total_ascent, that figure should be used
-// in place of this filter — it is what Garmin/Strava will agree with and was
-// filtered on-device. The parser does not currently surface that field, so
-// this filter is the fallback used for every source today. Out of scope here.
+// Fallback path (§5.3 step 2). When a FIT file carries a device-computed
+// session.total_ascent/total_descent, the parser surfaces it as
+// Activity.deviceElevationGainM/LossM and resolveElevation() below prefers
+// it over this filter (§5.3 step 1) — it is what Garmin/Strava will agree
+// with and was filtered on-device. This hysteresis pass still always runs:
+// splits[] need its per-point gains regardless of source, and its totals are
+// the activity figures whenever no trusted device total exists (GPX and TCX
+// always, FIT when the session omits the field).
 
 // Default threshold per spec §5.3: every format this library parses is
 // GPS-derived (GPX always; FIT usually, absent a device total_ascent — see
@@ -494,9 +497,12 @@ export function formatDistance(metres: number, units: 'metric' | 'imperial' = 'm
 }
 
 export function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.round(seconds % 60)
+  // Round to whole seconds *before* splitting so the carry propagates:
+  // 59.6s → 1:00, not 0:60 (same rule formatPace applies).
+  const totalSec = Math.round(seconds)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
   if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   return `${m}:${s.toString().padStart(2, '0')}`
 }

@@ -96,3 +96,46 @@ describe('GPX parsing', () => {
     expect(stats.elevationLossM).toBe(23)
   })
 })
+
+describe('GPX parsing — malformed values are dropped, never surfaced as NaN', () => {
+  const malformedGpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test">
+  <trk><name>Corrupt</name><type>running</type><trkseg>
+    <trkpt lat="52.3700" lon="4.9000">
+      <ele>banana</ele>
+      <time>not-a-timestamp</time>
+      <extensions><gpxtpx:TrackPointExtension>
+        <gpxtpx:hr>oops</gpxtpx:hr>
+        <gpxtpx:cad></gpxtpx:cad>
+      </gpxtpx:TrackPointExtension></extensions>
+    </trkpt>
+    <trkpt lat="52.3701" lon="4.9001">
+      <ele>3.0</ele>
+      <time>2026-01-01T08:00:01Z</time>
+      <extensions><gpxtpx:TrackPointExtension>
+        <gpxtpx:hr>140</gpxtpx:hr>
+        <gpxtpx:cad>85</gpxtpx:cad>
+      </gpxtpx:TrackPointExtension></extensions>
+    </trkpt>
+  </trkseg></trk>
+</gpx>`
+
+  test('non-numeric ele/hr/cad and unparseable time are absent, not NaN', () => {
+    const activity = parse(malformedGpx)
+    expect(activity.points.length).toBe(2)
+    const [bad, good] = activity.points
+    expect(bad.elevation).toBeUndefined()
+    expect(bad.heartRate).toBeUndefined()
+    expect(bad.cadence).toBeUndefined()
+    expect(bad.timestamp).toBeUndefined()
+    expect(good.heartRate).toBe(140)
+    expect(good.cadence).toBe(170)
+  })
+
+  test('analyze() over a partially-corrupt track yields finite HR stats, not NaN', () => {
+    const stats = analyze(parse(malformedGpx))
+    expect(stats.avgHeartRate).toBe(140)
+    expect(stats.maxHeartRate).toBe(140)
+    expect(Number.isNaN(stats.avgCadence)).toBe(false)
+  })
+})

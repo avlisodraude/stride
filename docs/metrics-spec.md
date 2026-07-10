@@ -305,7 +305,7 @@ sum(distanceM) = 1000+1000+1000+400 = 3400 = distanceM  ✓
 
 ⚠️ **Recommended: a hysteresis threshold, with the threshold chosen by data source, and — when available — deference to the device's own figure.**
 
-1. **If the source file already carries a device-computed total ascent** (FIT `session.total_ascent`), prefer it. It is what Garmin/Strava will agree with and it was filtered on-device. (This requires the parser to surface that field; if out of scope for this change, note it as the preferred long-term path and proceed with step 2.)
+1. **If the source file already carries a device-computed total ascent** (FIT `session.total_ascent`), prefer it. It is what Garmin/Strava will agree with and it was filtered on-device. (Implemented in 2.0.0: the parser surfaces the field as `Activity.deviceElevationGainM`/`LossM`, and the analyzer prefers it — with a zero-guard — reporting `elevationSource: 'device'`. See §5.6.)
 2. **Otherwise apply a hysteresis threshold** to the raw elevation series:
 
    ```

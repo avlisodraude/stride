@@ -94,6 +94,27 @@ describe('heartRateChartConfig', () => {
       expect(v).toBeLessThanOrEqual(163)
     })
   })
+
+  // The x-axis is distance, not sample index: smart-recording watches sample
+  // unevenly, so an index axis would stretch hard sections and compress easy
+  // ones. Same guard as the elevation chart — the axis must agree with
+  // stats.distanceM.
+  test('x-axis is distance and its final label matches stats.distanceM', () => {
+    const config = heartRateChartConfig(activity, stats)
+    const lastLabel = config.data.labels[config.data.labels.length - 1]
+    const labelKm = parseFloat(lastLabel)
+
+    expect(lastLabel.endsWith('km')).toBe(true)
+    // Label is rounded to one decimal place (100m), so allow up to 50m of
+    // rounding slack on either side.
+    expect(Math.abs(labelKm * 1000 - stats.distanceM)).toBeLessThanOrEqual(50)
+  })
+
+  test('imperial units convert the x-axis labels to miles', () => {
+    const config = heartRateChartConfig(activity, stats, { units: 'imperial' })
+    const lastLabel = config.data.labels[config.data.labels.length - 1]
+    expect(lastLabel.endsWith('mi')).toBe(true)
+  })
 })
 
 describe('hrZonesChartConfig', () => {
