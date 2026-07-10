@@ -37,6 +37,7 @@
   "type": "module",
   "exports": {
     ".": {
+      "browser": "./dist/index.browser.js",
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"

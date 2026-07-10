@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser'
 import { Decoder, Stream } from '@garmin/fitsdk'
-import fs from 'fs'
+import { readInputFile } from './file-input.js'
 import type { Activity, TrackPoint } from './types.js'
 
 const xmlParser = new XMLParser({
@@ -267,7 +267,7 @@ export function parse(input: string | Uint8Array | ArrayBuffer): Activity {
   // String that looks like a file path → read it and sniff the contents.
   const isPath = !input.trimStart().startsWith('<') && input.length < 1000
   if (isPath) {
-    const buf = fs.readFileSync(input)
+    const buf = readInputFile(input)
     const bytes = toUint8(buf)
     if (isFit(bytes)) return parseFit(bytes)
     return parseText(buf.toString('utf-8'))
