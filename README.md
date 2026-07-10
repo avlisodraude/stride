@@ -12,7 +12,7 @@ Parse GPX, TCX and FIT files, compute running metrics, and build Chart.js dashbo
 - **Charts with zero boilerplate** — 5 ready-made Chart.js configs (pace, elevation, heart rate, HR zones, splits) behind a separate `@alosha/stride/charts` entry point, so parse/analyze consumers never pull in Chart.js.
 - **CLI and library** — `npx stride analyze run.gpx`, metric or imperial, no config required.
 
-Upgrading from 1.x? Read **[MIGRATING.md](./MIGRATING.md)** — two loud changes, three silent ones.
+Upgrading from 1.x? Read **[MIGRATING.md](./MIGRATING.md)** — two silent changes, three loud ones, one deprecation.
 
 ## Install
 
@@ -150,6 +150,12 @@ elevation and reports 28. ([spec §5.3](./docs/metrics-spec.md))
   established LTHR conventions use seven zones rather than the five in
   `HeartRateZones`. A future `zoneModel: { type: 'lthr' }` mapping onto the
   existing five zones would be a non-breaking addition.
+- **Multisport FIT files are unexercised.** When a FIT file carries more than
+  one `session` message (a triathlon, a brick workout), stride sums
+  `totalDistance`, `totalAscent` and `totalDescent` across them. That
+  summation is implemented but has no test fixture — every fixture in the
+  suite carries exactly one session — so the multi-session path has never
+  executed. Single-session files, which is nearly every run, are covered.
 - **Streaming parse.** `parse()` and `parseFile()` read the whole file into
   memory. Activity files are kilobytes to a few megabytes, so this is the
   right trade; it would be the wrong one for a multi-gigabyte archive.

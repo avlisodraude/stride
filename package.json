@@ -89,7 +89,8 @@
     "sample:climb": "node scripts/make-climb-fit.mjs test/fixtures/climb-run.fit",
     "lint": "eslint src",
     "prepare": "husky",
-    "release": "npm run build && npm publish --access public"
+    "release": "npm run build && npm publish --access public",
+    "test:real": "node --experimental-vm-modules node_modules/.bin/jest --testMatch '**/*.manual.test.js' --testPathIgnorePatterns '/node_modules/'"
   },
   "dependencies": {
     "@garmin/fitsdk": "^21.205.0",

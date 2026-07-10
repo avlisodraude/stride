@@ -124,7 +124,10 @@ export function formatStats(
   }
 
   if (stats.splits.length > 0) {
-    lines.push('\n  Splits:')
+    // Splits are always kilometre splits — the boundaries are 1000 m whatever
+    // the display units. Under --imperial the pace, distance and elevation all
+    // convert, so the `km N` row label needs the header to explain itself.
+    lines.push(units === 'imperial' ? '\n  Splits (per kilometre):' : '\n  Splits:')
     for (const split of stats.splits) {
       const hr = split.avgHeartRate ? `  HR ${split.avgHeartRate}bpm` : ''
       const elev = split.elevationGainM > 0 ? `  ↑${formatElevation(split.elevationGainM, units)}` : ''

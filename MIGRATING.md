@@ -1,9 +1,10 @@
 # Migrating from 1.x to 2.x
 
-Five things changed. Two are loud (your bundler or Node will tell you); three
-are silent (your code keeps running and returns different numbers). This guide
-covers each: the code before, the code after, and — for the silent ones — how
-to tell whether you were affected.
+Six things changed. Two are **silent** — your code keeps running and returns
+different numbers. Three are **loud** — your bundler, compiler or Node will
+tell you. One is a **deprecation** that still works. This guide covers each:
+the code before, the code after, and — for the silent ones — how to tell
+whether you were affected.
 
 If you want the reasoning behind each change, see the
 [2.0.0 CHANGELOG entry](./CHANGELOG.md) and `docs/metrics-spec.md`.
@@ -83,7 +84,8 @@ const stats = analyze(activity, { elevationThresholdM: 2 })
 `paceChartConfig`, `elevationChartConfig`, `heartRateChartConfig`,
 `hrZonesChartConfig` and `splitsChartConfig` are no longer exported from the
 package root, and `chart.js` moved from a dependency to an *optional* peer
-dependency. Installing `@alosha/stride` alone drops from 11 MB to 3.8 MB.
+dependency. Installing `@alosha/stride` alone no longer pulls in `chart.js` — roughly
+6 MB removed from every install.
 
 ```ts
 // 1.x
@@ -104,13 +106,31 @@ The builders still return plain config objects and never call Chart.js — you
 need it to render a config and, in TypeScript, to resolve the
 `ChartConfiguration` type in their signatures.
 
-## 4. Node >= 18 required (loud)
+## 4. `ChartOptions` loses `charts` and `maxHR` (loud)
+
+Both fields were dead API. No chart builder ever read either one, so passing
+them did nothing:
+
+```ts
+// 1.x — compiled, ran, had no effect
+paceChartConfig(activity, stats, { maxHR: 185, units: 'metric' })
+
+// 2.x — configure HR zones where they are actually read: on analyze()
+const stats = analyze(activity, { maxHR: 185 })
+paceChartConfig(activity, stats, { units: 'metric' })
+```
+
+`units` is unchanged and still works. `ChartType` is unchanged. TypeScript
+consumers passing `charts` or `maxHR` get a compile error pointing at code
+that was already a no-op — that is the entire migration.
+
+## 5. Node >= 18 required (loud)
 
 `package.json` now declares `"engines": { "node": ">=18.0.0" }`. Node 14/16
 are EOL; `@garmin/fitsdk` ships syntax Node 14 cannot parse, so 1.x never
 actually worked there either — 2.x just says so.
 
-## 5. `analyze()` takes an options object (deprecated, not yet removed)
+## 6. `analyze()` takes an options object (deprecated, not yet removed)
 
 ```ts
 // 1.x (still works in 2.x, @deprecated, removed in 3.0.0)

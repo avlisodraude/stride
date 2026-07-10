@@ -60,9 +60,10 @@ come first.
     flat track is honoured.
 - **Chart builders moved to `@alosha/stride/charts`; `chart.js` is now an
   optional peer dependency.** This one is loud and immediate — your bundler
-  catches it. The payoff: installing `@alosha/stride` alone drops from
-  **11 MB to 3.8 MB**, because parse/analyze consumers no longer pull in
-  Chart.js at all.
+  catches it. The payoff: installing `@alosha/stride` alone no longer pulls in
+  Chart.js, **removing roughly 6 MB from every install**. (Chart.js was never
+  bundled — it was referenced only via `import type` — so this is install
+  weight, not bundle weight.)
 
   ```ts
   // 1.x

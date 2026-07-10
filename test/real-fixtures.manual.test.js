@@ -23,10 +23,24 @@ const files = fs.existsSync(realDir)
   ? fs.readdirSync(realDir).filter(f => ['.fit', '.gpx', '.tcx'].includes(extname(f).toLowerCase()))
   : []
 
-const maybeDescribe = files.length > 0 ? describe : describe.skip
+// This suite never silently opts out. It is excluded from the default `jest`
+// run and reached only via `npm run test:real`, which is a deliberate act. A
+// harness that passes with zero assertions because its fixtures are absent is
+// worse than no harness: it reports success for a code path that never ran. If
+// you invoked this suite, you meant to exercise real files; if there are none,
+// that is a failure.
+if (files.length === 0) {
+  throw new Error(
+    `No real activity files found in ${realDir}.\n` +
+    'This suite is opt-in and asserts nothing without fixtures. Drop a real\n' +
+    '.fit/.gpx/.tcx export into test/fixtures/real/ (see its README — the\n' +
+    'directory is gitignored because exports carry home coordinates), or do\n' +
+    'not run `npm run test:real`.'
+  )
+}
 
-maybeDescribe('real-device exports — universal invariants', () => {
-  test.each(files.length > 0 ? files : ['(none)'])('%s parses and analyzes cleanly', (file) => {
+describe('real-device exports — universal invariants', () => {
+  test.each(files)('%s parses and analyzes cleanly', (file) => {
     const activity = parse(join(realDir, file))
 
     // --- parse-level invariants -----------------------------------------
