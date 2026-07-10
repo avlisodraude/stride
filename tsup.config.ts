@@ -25,7 +25,7 @@ export default defineConfig([
     external: ['chart.js'],
   },
   {
-    entry: { 'index.browser': 'src/index.ts' },
+    entry: { 'index.browser': 'src/index.browser.ts' },
     format: ['esm'],
     dts: false,
     sourcemap: true,

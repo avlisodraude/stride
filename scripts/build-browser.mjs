@@ -24,7 +24,7 @@ const browserFileInput = {
 }
 
 await esbuild.build({
-  entryPoints: ['src/index.ts'],
+  entryPoints: ['src/index.browser.ts'],
   bundle: true,
   format: 'iife',
   globalName: 'Stride',

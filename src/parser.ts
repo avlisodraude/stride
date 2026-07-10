@@ -14,7 +14,7 @@ function asArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v]
 }
 
-function parseGpx(xml: string): Activity {
+export function parseGpx(xml: string): Activity {
   const doc = xmlParser.parse(xml)
   const gpx = doc.gpx
 
@@ -78,7 +78,7 @@ function parseGpx(xml: string): Activity {
 // TCX (Garmin Training Center XML) — Garmin / Strava / Wahoo exports
 // ---------------------------------------------------------------------------
 
-function parseTcx(xml: string): Activity {
+export function parseTcx(xml: string): Activity {
   const doc = xmlParser.parse(xml)
   const activities = asArray(doc?.TrainingCenterDatabase?.Activities?.Activity)
   const first = activities[0]
@@ -149,14 +149,14 @@ function parseTcx(xml: string): Activity {
 
 const SEMICIRCLE_TO_DEG = 180 / 2 ** 31
 
-function toUint8(bytes: Uint8Array | ArrayBuffer | ArrayLike<number>): Uint8Array {
+export function toUint8(bytes: Uint8Array | ArrayBuffer | ArrayLike<number>): Uint8Array {
   if (bytes instanceof Uint8Array) return bytes
   if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes)
   return Uint8Array.from(bytes as ArrayLike<number>)
 }
 
 /** Quick check for the ".FIT" signature in a binary buffer. */
-function isFit(bytes: Uint8Array): boolean {
+export function isFit(bytes: Uint8Array): boolean {
   try {
     return Decoder.isFIT(Stream.fromByteArray(bytes))
   } catch {
@@ -164,7 +164,7 @@ function isFit(bytes: Uint8Array): boolean {
   }
 }
 
-function parseFit(bytes: Uint8Array): Activity {
+export function parseFit(bytes: Uint8Array): Activity {
   const stream = Stream.fromByteArray(bytes)
   if (!Decoder.isFIT(stream)) {
     throw new Error('Unsupported file format. Supported formats: GPX, TCX, FIT.')
@@ -242,10 +242,23 @@ function parseFit(bytes: Uint8Array): Activity {
 // ---------------------------------------------------------------------------
 
 /** Dispatch a decoded XML/text document to the right parser. */
-function parseText(text: string): Activity {
+export function parseText(text: string): Activity {
   if (text.includes('<TrainingCenterDatabase')) return parseTcx(text)
   if (text.includes('<gpx')) return parseGpx(text)
   throw new Error('Unsupported file format. Supported formats: GPX, TCX, FIT.')
+}
+
+export interface ParseOptions {
+  /** Skip format sniffing and parse `input` as this format directly. */
+  format?: 'gpx' | 'tcx' | 'fit'
+}
+
+function truncate(s: string, max = 40): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
+function isEnoent(err: unknown): err is NodeJS.ErrnoException {
+  return typeof err === 'object' && err !== null && (err as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
 /**
@@ -256,18 +269,34 @@ function parseText(text: string): Activity {
  *  - a FIT file path (Node), or FIT bytes as `Uint8Array` / `ArrayBuffer`
  *
  * The format is auto-detected, so the same `analyze()` and chart configs work
- * for GPX, TCX and FIT input.
+ * for GPX, TCX and FIT input. Pass `{ format }` to skip auto-detection when
+ * the format is already known.
  */
-export function parse(input: string | Uint8Array | ArrayBuffer): Activity {
+export function parse(input: string | Uint8Array | ArrayBuffer, options?: ParseOptions): Activity {
   // Binary input is always FIT (GPX/TCX are text/XML).
   if (typeof input !== 'string') {
     return parseFit(toUint8(input))
   }
 
+  // Explicit format: skip path/content sniffing entirely.
+  if (options?.format === 'gpx') return parseGpx(input)
+  if (options?.format === 'tcx') return parseTcx(input)
+  if (options?.format === 'fit') return parseFit(toUint8(Buffer.from(input, 'binary')))
+
   // String that looks like a file path → read it and sniff the contents.
   const isPath = !input.trimStart().startsWith('<') && input.length < 1000
   if (isPath) {
-    const buf = readInputFile(input)
+    let buf: Buffer
+    try {
+      buf = readInputFile(input)
+    } catch (err) {
+      if (isEnoent(err)) {
+        throw new Error(
+          `Stride: "${truncate(input)}" is neither a readable path nor recognisable GPX/TCX/FIT input.`,
+        )
+      }
+      throw err
+    }
     const bytes = toUint8(buf)
     if (isFit(bytes)) return parseFit(bytes)
     return parseText(buf.toString('utf-8'))
