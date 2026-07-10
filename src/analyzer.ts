@@ -470,7 +470,11 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
     elevationLossM: Math.round(elevationLossM),
     elevationSource,
     avgHeartRate: hasHR ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : null,
-    maxHeartRate: hasHR ? Math.max(...hrValues) : null,
+    // reduce, not Math.max(...hrValues): spreading a long HR array (a multi-hour
+    // activity at 1 Hz is tens of thousands of samples, some FIT files far more)
+    // into a call blows the argument-count/stack limit. avgHeartRate above uses
+    // the same single-pass style.
+    maxHeartRate: hasHR ? hrValues.reduce((m, h) => (h > m ? h : m), -Infinity) : null,
     hrZones: hasHR ? hrZones(hrZoneSegments, pctOfMax, zoneBoundaries) : null,
     avgCadence: hasCadence ? Math.round(cadValues.reduce((a, b) => a + b, 0) / cadValues.length) : null,
     splits,
