@@ -143,6 +143,16 @@ elevation and reports 28. ([spec §5.3](./docs/metrics-spec.md))
 - **Device pause events.** `movingTimeSec` comes from a speed threshold
   (`pauseThresholdMps`), not from the watch's own timer-stop events, which
   most exports don't carry per-point.
+- **Lactate-threshold (LTHR) zone model.** `zoneModel` supports the two
+  anchors a runner can actually supply — `hrmax` and `reserve` (Karvonen).
+  Anchoring zones to lactate-threshold HR is deliberately not implemented:
+  LTHR must be *measured* by a 30-minute time-trial field test, and the
+  established LTHR conventions use seven zones rather than the five in
+  `HeartRateZones`. A future `zoneModel: { type: 'lthr' }` mapping onto the
+  existing five zones would be a non-breaking addition.
+- **Streaming parse.** `parse()` and `parseFile()` read the whole file into
+  memory. Activity files are kilobytes to a few megabytes, so this is the
+  right trade; it would be the wrong one for a multi-gigabyte archive.
 
 ## Supported formats
 
