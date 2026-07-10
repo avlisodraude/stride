@@ -55,7 +55,8 @@
         "types": "./dist/charts.d.cts",
         "default": "./dist/charts.cjs"
       }
-    }
+    },
+    "./package.json": "./package.json"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

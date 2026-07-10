@@ -34,6 +34,18 @@ track, elevation, heart rate, cadence and timestamps.
 npm install @alosha/stride
 ```
 
+Parsing and metrics have no peer dependencies. **Chart.js is only needed if you use the chart builders**,
+which live behind a separate entry point:
+
+```bash
+npm install @alosha/stride chart.js    # only if you import @alosha/stride/charts
+```
+
+`chart.js` is an *optional* peer dependency: installing `@alosha/stride` alone pulls no charting code and
+emits no peer warning. Note that `@alosha/stride/charts` returns plain Chart.js configuration objects and
+never calls Chart.js itself — you need the package to **render** a config, and, if you use TypeScript, to
+resolve the `ChartConfiguration` type in the builders' signatures.
+
 ## Quick start
 
 ```ts
