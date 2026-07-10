@@ -1,0 +1,9 @@
+{
+  "name": "stride-examples",
+  "private": true,
+  "type": "module",
+  "description": "Runnable @alosha/stride examples — `npm install` here links the package from the repo root (run `npm run build` there first), then run each with `node <file>`.",
+  "dependencies": {
+    "@alosha/stride": "file:.."
+  }
+}

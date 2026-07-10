@@ -76,6 +76,7 @@
     "dist",
     "README.md",
     "CHANGELOG.md",
+    "MIGRATING.md",
     "LICENSE"
   ],
   "scripts": {

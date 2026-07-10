@@ -3,115 +3,152 @@
 All notable changes to `@alosha/stride` are documented here. This project
 follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 2.0.0
+
+1.0.0 fixed the arithmetic; this release fixes the inputs. Where a device
+already measured distance and climb with better instruments than raw GPS,
+the analyzer was still re-deriving both from the GPS stream and integrating
+its jitter — so the numbers it published disagreed with what the runner's
+own watch, Garmin Connect and Strava all showed. 2.0.0 defers to the device
+where the device is right, says which source produced every figure, and
+stops shipping Chart.js to consumers who never draw a chart.
+
+The BREAKING entries below are ordered by how likely each is to bite
+*silently* — the ones your compiler and bundler will never warn you about
+come first.
 
 ### BREAKING
 
-- **FIT elevation now prefers the device's own `session.total_ascent` /
-  `total_descent` over the GPS-altitude hysteresis filter.** When a FIT file
-  carries these fields, `analyze()` reports them as
-  `elevationGainM`/`elevationLossM` and sets `elevationSource: 'device'` —
-  they're barometric/sensor-fused, filtered on-device, and the figure Garmin
-  Connect and Strava agree with (docs/metrics-spec.md §5.3 step 1, §5.6). Two
-  consequences are deliberate:
-  - **Elevation can go *up*, not only down.** The 1.0.0 hysteresis fix only
-    ever lowered gain relative to the old raw-delta sum; deferring to the
-    device is a different operation. A barometric altimeter catches rollers
-    GPS altitude flattens into noise, so `elevationSource: 'device'` can report
-    *more* gain than the hysteresis pass. On the new `climb-run.fit` fixture
-    the device reports **78 m** of ascent where the denoised GPS altitude shows
-    only **58 m**.
-  - **`sum(splits[].elevationGainM)` no longer equals `elevationGainM` when
-    `elevationSource === 'device'`.** The device gives one activity-level total
-    and doesn't say how it's distributed over distance, so per-split gains stay
-    hysteresis-derived (the only signal sliceable by distance). Check
-    `elevationSource` before assuming the splits add up.
+- **`distanceM` now comes from the device when the file provides it — and it
+  is shorter, silently.** FIT (`record.distance`/`enhancedDistance`) and TCX
+  (`<DistanceMeters>`) files carry a device-filtered cumulative distance
+  stream; `analyze()` now uses it whenever it is usable across the whole
+  track (present on every point, non-decreasing, not all-zero). The old
+  behaviour — summing haversine distances between raw GPS fixes — was
+  integrating ±3–5 m of per-fix jitter as extra path length. On the sample
+  fixtures the shift is small (1983 → **1980**, calibrated tracks); on real
+  files with real jitter the gap is larger, typically **1–3%**. Because
+  `distanceM` is the denominator of `avgPaceSecPerKm`, every `splits[]`
+  entry and `bestKmPaceSecPerKm`, all of those move with it. **Your runs did
+  not get shorter; the old numbers were wrong.** GPX has no standard
+  distance element and is unchanged (always `'computed'`). Check
+  `stats.distanceSource` to see which path ran.
+- **Elevation changed twice, in opposite directions.** Read both together —
+  a user watching their gain fall on one file and rise on another will
+  otherwise conclude the library is guessing:
+  - **The default hysteresis threshold went 3 m → 8 m, which lowers gain.**
+    The 3 m default sat at the top of the *barometric* noise band, but every
+    altitude stream this library filters is GPS-derived (GPX always; FIT and
+    TCX whenever no device total is present), and GPS altitude noise is
+    larger — authoritative sources recommend 6–10 m there (Strava ~10 m for
+    non-barometric activities, GPS Visualizer 6–9 m). `sample-run.tcx`
+    reports **12 → 0**: a realistically flat GPS track whose "climb" was
+    noise all along. If you know your data is barometric, pass
+    `elevationThresholdM: 2` to keep a barometric-grade threshold.
+  - **FIT files carrying `session.totalAscent`/`totalDescent` now defer to
+    the device, which can *raise* gain.** The device total is barometric or
+    sensor-fused, filtered on-device, and is the figure Garmin Connect and
+    Strava agree with. A barometric altimeter catches rollers that GPS
+    altitude flattens into noise, so the device figure can exceed anything
+    the hysteresis pass finds: `climb-run.fit` reports **78** where the GPS
+    stream computes **58**. `stats.elevationSource` reads `'device'` when
+    this path ran; in that case `sum(splits[].elevationGainM)` no longer
+    equals `elevationGainM`, because the device reports one activity-level
+    scalar that cannot be attributed to distance ranges — splits keep using
+    the hysteresis pass. A zero-guard keeps a bogus `totalAscent: 0` from
+    hiding a real climb (falls back to `'computed'`); a 0 on a genuinely
+    flat track is honoured.
+- **Chart builders moved to `@alosha/stride/charts`; `chart.js` is now an
+  optional peer dependency.** This one is loud and immediate — your bundler
+  catches it. The payoff: installing `@alosha/stride` alone drops from
+  **11 MB to 3.8 MB**, because parse/analyze consumers no longer pull in
+  Chart.js at all.
 
-  A zero-guard keeps a bogus `total_ascent: 0` from hiding a real climb: a 0 on
-  a track whose GPS altitude clearly climbs falls back to `'computed'`; a 0 on
-  a genuinely flat track is honoured. GPX and TCX have no such field and are
-  always `'computed'`. **`sample-run.fit` is unaffected — it carries no
-  `total_ascent`, so it stays `'computed'` and its `elevationGainM` is
-  unchanged at `0`.**
-- **`DEFAULT_ELEVATION_THRESHOLD_M` changes from 3m to 8m.** The 1.0.0
-  hysteresis fix picked 3m as a provenance-agnostic compromise, sitting at
-  the top of the *barometric* noise band (docs/metrics-spec.md §5.2). But
-  every format this library parses is GPS-derived altitude — GPX always,
-  FIT usually, absent a device `total_ascent` — for which authoritative
-  sources recommend a materially larger threshold (Strava ~10m, GPS
-  Visualizer 6-9m). 3m barely filtered GPS-grade noise (±3-5m per fix).
-  `elevationGainM`/`elevationLossM` drop further, especially on flat or
-  gently-rolling GPS-only tracks, where confirmed climbs are now rarer.
-  Callers who know their source is barometric can pass a lower
-  `elevationThresholdM` (toward 2-3m) to `analyze()`. See
-  docs/metrics-spec.md §5.3 for the full rationale and a documented
-  limitation (a climb's trailing, still-unconfirmed rise is never
-  credited).
-- **`distanceM` now prefers the device's own distance stream over summed
-  haversine.** When a FIT (`record.distance`/`enhancedDistance`) or TCX
-  (`<DistanceMeters>`) file carries a usable cumulative-distance stream —
-  present on every point, non-decreasing, not all-zero — `analyze()` reports
-  that instead of integrating haversine distances between raw GPS points.
-  Summing per-fix segments accumulated ±3–5 m of GPS jitter as extra path
-  length (typically +1–3%); this is the same class of defect as the 1.0.0
-  elevation-gain fix. Because `distanceM` is the denominator of
-  `avgPaceSecPerKm`, every `splits[]` entry and `bestKmPaceSecPerKm`, those
-  numbers can all shift slightly. GPX has no standard distance element and is
-  unchanged (always `'computed'`).
+  ```ts
+  // 1.x
+  import { parse, analyze, paceChartConfig } from '@alosha/stride'
+  // 2.0
+  import { parse, analyze } from '@alosha/stride'
+  import { paceChartConfig } from '@alosha/stride/charts'
+  ```
+
+  If you use the chart builders, `npm install chart.js` — they still return
+  plain config objects and never call Chart.js, but you need it to render
+  them and (in TypeScript) to resolve the `ChartConfiguration` type.
+  `paceChartConfig`, `elevationChartConfig`, `heartRateChartConfig`,
+  `hrZonesChartConfig` and `splitsChartConfig` are no longer exported from
+  the package root.
+- **`engines` now requires Node >= 18.** `@garmin/fitsdk` ships syntax that
+  fails to load on Node 14, and Node < 18 is EOL and was never tested.
+- **`analyze()` takes an options object:** `analyze(activity, { maxHR: 185,
+  elevationThresholdM: 2 })`. The positional form
+  `analyze(activity, maxHR, elevationThresholdM)` still works, is marked
+  `@deprecated`, and will be removed in 3.0.0.
 
 ### Added
 
-- **`ActivityStats.elevationSource: 'device' | 'computed'`** — reports whether
-  the elevation totals came from the device's own session figure or the
-  GPS-altitude hysteresis fallback. Additive; the signal a consumer checks
-  before assuming per-split gains sum to `elevationGainM`.
-- **`Activity.deviceElevationGainM?: number` / `Activity.deviceElevationLossM?:
-  number`** — the device's own total ascent/descent for the whole activity,
-  read from FIT `session.total_ascent`/`total_descent` (summed across sessions
-  in a multisport file). Activity-level scalars, not a per-point stream, so
-  they cannot be attributed to individual splits. Undefined for GPX and TCX,
-  and for FIT files whose session omits the field.
-- **`ActivityStats.distanceSource: 'device' | 'computed'`** — reports which
-  path produced the distance, splits and best-km series so a consumer can
-  tell device-reported distance from the haversine fallback. Additive.
-- **`TrackPoint.distanceM?: number`** — device-reported *cumulative* distance
-  from the activity start (metres), populated by the FIT and TCX parsers.
-- **`Activity.deviceDistanceM?: number` / `ActivityStats.deviceDistanceM?:
-  number`** — the device's own *total* distance for the whole activity, read
-  verbatim from TCX `<Lap><DistanceMeters>` (summed across laps) or FIT
-  `session.totalDistance` (summed across sessions). This is separate from the
-  per-point distance stream above: it's a single reported total, not consumed
-  by any computed metric, and passed through unrounded. Undefined for GPX
-  (no such element), and undefined whenever the reported total is 0 or
-  smaller than `distanceM` — a device that didn't record a real total, not a
-  real (if odd) distance.
+- **`parseFile(path, options?)`** — async, `fs/promises`-backed file reading
+  (Node only). No path-vs-content sniffing: the argument is unambiguously a
+  path.
+- **`parse(input, { format: 'gpx' | 'tcx' | 'fit' })`** — skip format
+  sniffing when you already know the format.
+- **`ActivityStats.distanceSource` / `ActivityStats.elevationSource`**
+  (`'device' | 'computed'`) — which path produced the distance and elevation
+  figures. `elevationSource` is the signal to check before assuming
+  per-split gains sum to `elevationGainM`.
+- **`ActivityStats.deviceDistanceM` / `Activity.deviceDistanceM`** — the
+  device's own total distance (TCX `<Lap><DistanceMeters>` summed across
+  laps, FIT `session.totalDistance` summed across sessions), passed through
+  unrounded and not consumed by any computed metric. It can legitimately
+  exceed `distanceM`: the device counts distance accumulated before its
+  first position fix; `distanceM` measures between the first and last
+  recorded point. `distanceM: 1980` next to `deviceDistanceM: 1983.3` is
+  expected, not a bug. Undefined for GPX, and whenever the reported total is
+  0 or smaller than `distanceM`.
+- **`AnalyzeOptions.zoneModel`** — configurable HR zone model:
+  `{ type: 'hrmax' }` (default, the historical %HRmax bands) or
+  `{ type: 'reserve', restingHR }` (Karvonen, % of heart-rate reserve), each
+  with optional custom `boundaries`. Invalid boundaries (not strictly
+  increasing, or outside (0, 1)) throw a clear error instead of silently
+  mis-bucketing zones.
+- **`AnalyzeOptions.pauseThresholdMps`** — the speed below which a segment
+  counts as paused rather than moving (default 0.3, the previously hardcoded
+  value).
+- **Browser export condition** — bundlers resolve a browser-safe entry
+  (`dist/index.browser.js`, with its own type declarations) that never
+  references `fs`. `parseFile` is absent from the browser build.
+- **`./package.json` export** — tooling can read the manifest through the
+  sealed exports map.
 
-  **It can legitimately differ from `distanceM`.** `distanceM` only covers
-  the first-to-last *recorded* point; `deviceDistanceM` is the device's own
-  count, which can include distance accumulated before the first usable GPS
-  fix or during position-less segments. If you see `distanceM: 1980` next to
-  `deviceDistanceM: 1983.3` on the same activity, that gap is expected, not a
-  bug — the two numbers answer different questions.
+### Fixed
 
-### Notes
+- `hrZonesChartConfig` no longer throws when an activity has no heart rate
+  data — it returns a clearly-labelled all-zero doughnut, so a dashboard
+  renders a placeholder instead of crashing.
+- The trailing partial split is labelled honestly in the pace and splits
+  charts (`km 2 (0.98 km)`, with a faded bar) instead of being presented as
+  a full kilometre.
+- `elevationChartConfig` no longer computes its x-axis with a flat-earth
+  approximation that overstated longitude by 63% at 52°N — its axis read
+  3.2 km for a 1.98 km run. It now shares the exact distance series
+  `analyze()` uses, so the chart can never disagree with `stats.distanceM`.
+- `parse()` gives a real error (with a truncated input preview) when a short
+  invalid string is mistaken for a file path, instead of a confusing
+  `ENOENT`.
 
-- The device stream is used only when trustworthy for the *whole* track. A
-  field that is missing on any point, goes backwards, or is uniformly zero is
-  treated as absent and the whole activity falls back to haversine — the two
-  are never mixed per segment, which would put a discontinuity in the
-  cumulative series.
-- The elevation chart's x-axis follows `distanceSource`, so its final
-  distance label continues to match `stats.distanceM`.
-- Sample-fixture movement, device vs. the previous haversine sum:
+### Which numbers move
 
-  | fixture          | distanceM     | avgPaceSecPerKm | bestKmPaceSecPerKm | splits |
-  | ---------------- | ------------- | --------------- | ------------------ | ------ |
-  | `sample-run.fit` | 1983 → **1980** | 303 (unchanged) | 303 (unchanged)    | 2 (unchanged) |
-  | `sample-run.tcx` | 1983 → **1980** | 303 (unchanged) | 303 (unchanged)    | 2 (unchanged) |
+Measured on the shipped fixtures; the direction is what to expect on real
+files, the magnitude there is usually larger.
 
-  Both sample fixtures were deliberately calibrated so the GPS path length
-  nearly matches the device total, so the shift is small (−3 m, the leading
-  distance before the first GPS fix); files with real GPS jitter move more.
+| Metric (fixture) | 1.x | 2.0 | Direction |
+| --- | --- | --- | --- |
+| `distanceM` (`sample-run.fit` / `.tcx`) | 1983 | **1980** | Down — device distance replaces jitter-inflated haversine; 1–3% on real files |
+| `avgPaceSecPerKm` (`sample-run.fit` / `.tcx`) | 303 | 303 | Moves with `distanceM` (unchanged on these calibrated fixtures) |
+| `bestKmPaceSecPerKm` (`sample-run.fit` / `.tcx`) | 303 | 303 | Moves with `distanceM` (unchanged on these calibrated fixtures) |
+| `elevationGainM` (`sample-run.tcx`, GPS altitude) | 12 | **0** | Down — threshold 3 m → 8 m stops counting GPS noise as climb |
+| `elevationGainM` (`climb-run.fit`, device total) | 58 (GPS stream) | **78** | Up — the device's barometric total supersedes the GPS-derived figure |
+| `deviceDistanceM` (`sample-run.fit` / `.tcx`) | — | 1983.3 | New field, reported verbatim and unrounded |
 
 ## 1.0.0
 
