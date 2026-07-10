@@ -1,6 +1,6 @@
 {
   "name": "@alosha/stride",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Parse GPX, TCX and FIT files and compute running metrics — pace, HR zones, splits, and Chart.js dashboards. Zero config.",
   "keywords": [
     "gpx",
