@@ -17,3 +17,8 @@ test/fixtures/real/*
 
 # Generated demo bundle for stride.alosha.dev (site asset, not shipped)
 demo/
+
+# Local AI tooling
+.claudeignore
+CLAUDE*.md
+repomix.config.json
