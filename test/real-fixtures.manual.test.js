@@ -14,6 +14,8 @@
 import { fileURLToPath } from 'node:url'
 import { dirname, join, extname } from 'node:path'
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
+const publicExports = JSON.parse(fs.readFileSync(new URL('./public-exports.json', import.meta.url), 'utf8'))
 import { parse, analyze } from '../dist/index.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -48,10 +50,10 @@ describe('real-device exports — universal invariants', () => {
     expect(Array.isArray(activity.points)).toBe(true)
     for (const p of activity.points) {
       if (p.lat != null || p.lon != null) {
-      expect(Number.isFinite(p.lat)).toBe(true)
-      expect(Number.isFinite(p.lon)).toBe(true)
-      expect(Math.abs(p.lat)).toBeLessThanOrEqual(90)
-      expect(Math.abs(p.lon)).toBeLessThanOrEqual(180)
+        expect(Number.isFinite(p.lat)).toBe(true)
+        expect(Number.isFinite(p.lon)).toBe(true)
+        expect(Math.abs(p.lat)).toBeLessThanOrEqual(90)
+        expect(Math.abs(p.lon)).toBeLessThanOrEqual(180)
       }
       // Optional fields are either absent or finite — never NaN, never an
       // Invalid Date (the parser must drop malformed values at the boundary).
@@ -64,8 +66,26 @@ describe('real-device exports — universal invariants', () => {
       if (p.timestamp != null) expect(Number.isNaN(p.timestamp.getTime())).toBe(false)
     }
 
+    const pinned = publicExports.fixtures.find(fixture => fixture.file === file)
+    if (pinned) {
+      const bytes = fs.readFileSync(join(realDir, file))
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(pinned.sha256)
+      expect(activity.format).toBe(pinned.format)
+      expect(activity.points).toHaveLength(pinned.expectedPoints)
+      expect(1 + activity.points.filter(p => p.segmentStart).length).toBe(pinned.expectedSpans)
+      expect(activity.points.every(p => p.timestamp && p.heartRate > 0 && p.cadence != null)).toBe(true)
+      expect(activity.parseDiagnostics.droppedRecords).toBe(0)
+    }
+
     // --- analyze-level invariants ----------------------------------------
     const stats = analyze(activity)
+
+    if (pinned) {
+      expect(stats.distanceM).toBeGreaterThan(0)
+      expect(stats.elapsedTimeSec).toBeGreaterThan(0)
+      expect(stats.quality.timingSource).toBe('recorded')
+      expect(stats.distanceSource).toBe(pinned.format === 'gpx' ? 'computed' : 'device')
+    }
 
     // Every numeric stat is finite — NaN anywhere means corrupt input leaked
     // through a guard.

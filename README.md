@@ -12,7 +12,7 @@ Parse GPX, TCX and FIT files, compute running metrics, and build Chart.js dashbo
 - **Charts with zero boilerplate** — 5 ready-made Chart.js configs (pace, elevation, heart rate, HR zones, splits) behind a separate `@alosha/stride/charts` entry point, so parse/analyze consumers never pull in Chart.js.
 - **CLI and library** — `npx stride analyze run.gpx`, metric or imperial, no config required.
 
-Version **3.0.0** adds indoor recordings, quality reports, FIT timer handling and custom splits. Upgrading from 2.x or 1.x? Read **[MIGRATING.md](./MIGRATING.md)** for public type and metric changes.
+Version **3.0.1** adds reproducible public Garmin-export validation to the 3.0.0 release, which introduced indoor recordings, quality reports, FIT timer handling and custom splits. Upgrading from 2.x or 1.x? Read **[MIGRATING.md](./MIGRATING.md)** for public type and metric changes.
 
 ## Install
 
@@ -522,3 +522,14 @@ Get in touch at [alosha.dev/support](https://alosha.dev/support).
 ---
 
 Docs & live demo: [stride.alosha.dev](https://stride.alosha.dev) · Built by [Alosha](https://alosha.dev)
+
+
+## Export validation
+
+Validation includes a private genuine FIT export and pinned public Garmin
+GPX/TCX export samples, alongside synthetic regressions. Reproduce from a repository checkout with
+`npm run build && npm run fixtures:exports && npm run test:real`.
+The public samples are downloaded unchanged with checksum/license checks;
+CI validates them on Node 22. `test:real:all` additionally requires local FIT
+coverage. Activity files stay ignored and outside the npm package.
+See [provenance, results and limits](docs/export-validation.md).

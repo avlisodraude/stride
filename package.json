@@ -1,6 +1,6 @@
 {
   "name": "@alosha/stride",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Parse GPX, TCX and FIT files and compute running metrics \u2014 pace, HR zones, splits, and Chart.js dashboards. Zero config.",
   "keywords": [
     "gpx",
@@ -89,7 +89,7 @@
     "sample:climb": "node scripts/make-climb-fit.mjs test/fixtures/climb-run.fit",
     "lint": "eslint src",
     "prepare": "husky",
-    "release": "npm run release:preflight && npm run check && npm run release:preflight && npm publish --access public",
+    "release": "npm run release:preflight && npm run check && npm run fixtures:exports && npm run test:real && npm run release:preflight && npm publish --access public",
     "test:real": "node scripts/test-real.mjs",
     "test:package": "node scripts/test-package.mjs",
     "test:examples": "node scripts/test-examples.mjs",
@@ -100,7 +100,8 @@
     "release:preflight": "node scripts/release-preflight.mjs",
     "prepublishOnly": "npm run release:preflight",
     "test:performance": "node --expose-gc scripts/test-performance.mjs",
-    "test:real:all": "node scripts/test-real.mjs --require-all-formats"
+    "test:real:all": "node scripts/test-real.mjs --require-all-formats",
+    "fixtures:exports": "node scripts/fetch-public-exports.mjs"
   },
   "dependencies": {
     "@garmin/fitsdk": "^21.218.0",

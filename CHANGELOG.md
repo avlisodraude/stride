@@ -3,6 +3,12 @@
 All notable changes to `@alosha/stride` are documented here. This project
 follows [Semantic Versioning](https://semver.org/).
 
+## 3.0.1 — 2026-11-02
+
+- Add pinned, checksum-verified public Garmin GPX/TCX export validation,
+  provenance documentation and Node 22 CI coverage. The all-format local
+  suite passes with those samples and the existing private FIT export.
+
 ## 3.0.0 — 2026-11-02
 
 - Validate XML timestamp calendar/clock/offset fields before Date conversion,

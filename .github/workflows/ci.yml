@@ -42,6 +42,10 @@ jobs:
       - name: Run examples
         run: npm run test:examples
 
+      - name: Validate pinned Garmin GPX and TCX exports
+        if: matrix.node == 22
+        run: npm run fixtures:exports && npm run test:real
+
       - name: Check large-file performance
         if: matrix.node == 22
         run: npm run test:performance

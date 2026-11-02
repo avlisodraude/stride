@@ -105,12 +105,15 @@ reports format coverage without exposing filenames, times or coordinates.
 `npm run test:real:all` requires all three formats before running the suite;
 missing formats fail explicitly. Only genuine exports belong in that folder;
 converted/synthetic files cannot establish real-export coverage. Current local
-coverage is one genuine FIT export; genuine GPX and TCX validation is pending.
-Do not describe the release candidate as fully verified across formats until
-that separate gate passes. Private exports stay ignored and outside npm packs.
+coverage includes a private FIT export and pinned public Garmin GPX/TCX export
+samples. The all-format gate passes for these samples. See
+[export-validation.md](export-validation.md) for provenance, limits and reproduction. Private exports stay ignored and outside npm packs.
 
 Version 3.0.0 is the major release for the optional coordinates, source variants,
 quality fields and configurable splits. See `MIGRATING.md`. Release preflight
-requires a clean committed checkout and matching v3.0.0 tag. GitHub CI verifies
+requires a clean committed checkout and matching version tag. GitHub CI verifies
 the supported runtime matrix. Publication and website deployment are separate
 steps; confirm the npm version and deployed demo asset after release.
+
+Version 3.0.1 adds the pinned public export checks. Local `release` and the
+GitHub Release workflow download and validate them before publication.
