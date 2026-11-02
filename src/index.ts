@@ -6,6 +6,9 @@ export { analyze, formatPace, formatDistance, formatDuration } from './analyzer.
 export type { AnalyzeOptions, HrZoneModel } from './analyzer.js'
 export type {
   Activity,
+  ParseDiagnostics,
+  TimerEvent,
+  DataQuality,
   TrackPoint,
   ActivityStats,
   Split,

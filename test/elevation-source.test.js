@@ -104,7 +104,9 @@ describe('zero-guard on device total_ascent (metrics-spec.md §5.6)', () => {
       pt({ lon: 0.002, timestamp: tsAt(20), elevation: 120 }),
     ]
     const stats = analyze({ points, format: 'fit', deviceElevationGainM: 0, deviceElevationLossM: 0 })
-    expect(stats.elevationSource).toBe('computed')
+    expect(stats.elevationSource).toBe('mixed')
+    expect(stats.elevationGainSource).toBe('computed')
+    expect(stats.elevationLossSource).toBe('device')
     expect(stats.elevationGainM).toBe(20)
   })
 

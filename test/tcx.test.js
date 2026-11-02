@@ -92,7 +92,10 @@ describe('TCX parsing — malformed values are dropped, never surfaced as NaN', 
   })
 
   test('analyze() over a partially-corrupt track yields finite HR stats, not NaN', () => {
-    const stats = analyze(parse(malformedTcx))
+    const activity = parse(malformedTcx)
+    expect(() => analyze(activity)).toThrow(/Incomplete timing/)
+    // An intentionally timestamp-free track still supports sensor summaries.
+    const stats = analyze({ ...activity, points: activity.points.map(({ timestamp, ...point }) => point) })
     expect(stats.avgHeartRate).toBe(150)
     expect(stats.maxHeartRate).toBe(150)
   })

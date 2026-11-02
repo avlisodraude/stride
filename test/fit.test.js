@@ -8,6 +8,31 @@ const fixturePath = join(here, 'fixtures', 'sample-run.fit')
 const fixtureBytes = fs.readFileSync(fixturePath)
 
 describe('FIT parsing', () => {
+  test('rejects a bad checksum rather than returning apparently complete data', () => {
+    const damaged = new Uint8Array(fixtureBytes)
+    damaged[damaged.length - 1] ^= 0xff
+    expect(() => parse(damaged)).toThrow(/Invalid FIT file.*CRC/)
+  })
+
+  test('rejects truncated files rather than returning partial activities', () => {
+    expect(() => parse(new Uint8Array(fixtureBytes.subarray(0, -100))))
+      .toThrow(/Invalid FIT file/)
+  })
+
+  test('aggregates distance and elevation across FIT sessions', () => {
+    const activity = parse(fs.readFileSync(join(here, 'fixtures', 'multi-session.fit')))
+    expect(activity.points).toHaveLength(3)
+    expect(activity.deviceDistanceM).toBe(1500)
+    expect(activity.deviceElevationGainM).toBe(20)
+    expect(activity.deviceElevationLossM).toBe(10)
+    const stats = analyze(activity)
+    expect(stats.distanceM).toBe(1500)
+    expect(stats.deviceDistanceM).toBe(1500)
+    expect(stats.elevationSource).toBe('device')
+    expect(stats.elevationGainM).toBe(20)
+    expect(stats.elevationLossM).toBe(10)
+  })
+
   test('parses FIT bytes into a normalised activity', () => {
     const activity = parse(new Uint8Array(fixtureBytes))
     expect(activity.format).toBe('fit')

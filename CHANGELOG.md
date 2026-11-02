@@ -3,6 +3,98 @@
 All notable changes to `@alosha/stride` are documented here. This project
 follows [Semantic Versioning](https://semver.org/).
 
+## 3.0.0 — 2026-11-02
+
+- Validate XML timestamp calendar/clock/offset fields before Date conversion,
+  rejecting impossible dates and informal/numeric timestamps. Retain leap days,
+  valid offsets, fractional seconds, end-of-day midnight and local-time inputs
+  within the supported four-digit positive-year range. FIT decoded Dates retain
+  their existing validation path.
+- Preserve maximum HR for a single valid reading and display it independently
+  of duration-weighted averages.
+- Label unavailable distance, elapsed/moving time and pace in CLI text; retain
+  measured zero distance/time and the numeric JSON schema.
+
+- Preserve every TCX Track boundary, including tracks in later laps, and
+  break GPX continuity after rejected coordinates. Exclude artificial jumps
+  and gap durations from recorded metrics and keep best-km inside intact spans.
+- Preserve chart peaks/valleys with bucket minimum/maximum sampling, bounded
+  to 200 points across all datasets. Split profile datasets at missing sensor
+  readings or required timestamps; render isolated readings with visible markers.
+
+- Retain GPS-less FIT/TCX readings and expose unavailable/incomplete distance
+  coverage without fabricating coordinates. Profile charts use elapsed time
+  or sample indices when distance is unavailable.
+- Add structured quality reports: parser discard counts, timing assumptions,
+  missing data and device-distance/elevation/timer fallback reasons. CLI output
+  displays timing/movement sources and warning codes.
+- Decode FIT timer start/stop variants, validate transitions, and intersect
+  active intervals with recorded spans. Auto mode prefers valid timer duration;
+  `pauseDetection: 'speed'` retains the threshold policy. Expose timer duration
+  and moving-time provenance separately. Timer time can include standing.
+- Configure split lengths in metres (including 500 m and 1609.344 m miles).
+  Preserve rounded totals with cumulative boundary rounding; add split index,
+  target length and partial flags, with corresponding chart/CLI labels.
+- Add deterministic generated-input regressions, 10k/100k-point performance
+  checks and an explicit all-format real-export validation gate. Genuine GPX
+  and TCX coverage remains pending until private exports are available.
+- Suppress device totals smaller than rounded point-stream distance.
+
+- Resolve device ascent and descent independently, retaining usable device
+  totals and falling back to hysteresis for each missing/invalid/contradictory
+  total. Add `elevationGainSource` / `elevationLossSource` and the `mixed`
+  combined provenance value. Consumers switching on `elevationSource` must
+  handle `mixed` and use the per-total fields for individual metrics.
+- Reject multi-activity TCX input with a clear error; retain multi-lap support
+  within one activity instead of joining unrelated routes and sports.
+- Add read-only release preflight checks for clean committed source, valid
+  package versions, matching version tags and tags pointing at the current
+  commit. Enforce them in local release, direct publish and tag-based CI flows.
+- Pin `saxes` to 6.0.0 after evaluating replacements against strict XML,
+  Node 18 and browser requirements; document its archived upstream and the
+  criteria for replacement. Expand XML character-conformance regressions.
+
+- Validate XML structure before extraction and require the expected GPX/TCX
+  root, including when the format is specified explicitly.
+- Apply format hints to file contents consistently; support hinted XML byte
+  input and reject unsupported format hints and binary-encoded FIT strings.
+- Discard non-positive XML/FIT HR readings and negative cadence; validate
+  sensor domains on manually constructed activities and display zero cadence.
+- Upgrade Jest to 30 and add real Chromium/Chrome rendering checks for all
+  five charts, both unit systems, narrow/wide viewports, gaps and tooltips.
+  Render each continuous profile span in a separate dataset to avoid Chart.js
+  object-data parsing failures with null gap entries.
+
+- Preserve GPX segment/track boundaries in `TrackPoint.segmentStart`. Exclude
+  unrecorded gaps from distance, moving/split time, sensor weighting and
+  elevation changes; keep wall-clock elapsed time and constrain best-km
+  efforts to one continuous span. Profile charts separate datasets at gaps.
+- Weight average HR, cadence and split HR by covered duration using ending
+  samples. Split HR distributes intervals across kilometre boundaries. Averages
+  can change on uneven recordings and return null without covered sensor time.
+- Suppress zero-distance rounded splits, folding sub-metre tails and their
+  timing/sensor/elevation contributions into the final represented split.
+- Resolve GPX/TCX and Garmin extension namespaces by URI with scoped prefix
+  bindings, supporting arbitrary aliases and ignoring foreign lookalike tags.
+
+- Fix CommonJS loading on Node 18 and older Node 20 releases by bundling the
+  ESM Garmin decoder in the CommonJS build. This increases that build's size;
+  ESM and browser module builds keep the SDK external.
+- Reject FIT decoder errors instead of returning partial/corrupted data.
+- Interpolate missing interior timestamps; reject incomplete endpoint timing,
+  backward clocks and instantaneous movement instead of inventing durations.
+- Exclude pauses before/after a best-kilometre effort while retaining pauses
+  inside it. Splits continue to include activity elapsed time.
+- Validate finite/ranged coordinates, finite sensor readings, nonnegative
+  thresholds and exactly four HR zone boundaries.
+- Use numeric distance coordinates for elevation and HR profiles, preserving
+  the full route around missing readings and limiting profiles to 200 points.
+  Dataset customization must now read `{ x, y }` points instead of y-only data
+  and `data.labels`.
+- Refresh compatible dependencies and use Garmin's supplied TypeScript types.
+- Add regression fixtures, packed-package/browser/type checks and example
+  verification to CI and the local release gate. Fix the browser upload example.
+
 ## 2.0.0
 
 1.0.0 fixed the arithmetic; this release fixes the inputs. Where a device

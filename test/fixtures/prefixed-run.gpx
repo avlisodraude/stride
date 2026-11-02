@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<g:gpx xmlns:g="http://www.topografix.com/GPX/1/1"
+       xmlns:watch="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
+       version="1.1" creator="stride-test">
+  <g:metadata><g:name>Prefixed fixture</g:name></g:metadata>
+  <g:trk><g:trkseg>
+    <g:trkpt lat="0" lon="0">
+      <g:time>2026-01-01T00:00:00Z</g:time>
+      <g:extensions><watch:TrackPointExtension><watch:hr>140</watch:hr></watch:TrackPointExtension></g:extensions>
+    </g:trkpt>
+    <g:trkpt lat="0" lon="0.001">
+      <g:time>2026-01-01T00:00:30Z</g:time>
+      <g:extensions><watch:TrackPointExtension><watch:hr>145</watch:hr></watch:TrackPointExtension></g:extensions>
+    </g:trkpt>
+  </g:trkseg></g:trk>
+</g:gpx>

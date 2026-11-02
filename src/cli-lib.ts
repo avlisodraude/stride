@@ -14,6 +14,8 @@ Usage:
 
 Options:
   --imperial                 Output in miles, feet and min/mi
+  --split-distance <m>      Split length in metres (default 1000; mile 1609.344)
+  --speed-pauses            Detect pauses by speed instead of FIT timer events
   --json                     Print the ActivityStats object as JSON (machine-readable)
   --max-hr <bpm>             Max heart rate for HR zone calculation (default 190)
   --elevation-threshold <m>  Elevation hysteresis threshold in metres
@@ -35,13 +37,16 @@ export type CliAction =
       json: boolean
       maxHR?: number
       elevationThresholdM?: number
+      splitDistanceM?: number
+      pauseDetection?: 'speed'
     }
 
 // Flags that take a numeric value. Range validation stays in analyze() —
 // the CLI only rejects values that aren't numbers at all, so the two never
 // disagree about what's acceptable.
-const VALUE_FLAGS: Record<string, 'maxHR' | 'elevationThresholdM'> = {
+const VALUE_FLAGS: Record<string, 'maxHR' | 'elevationThresholdM' | 'splitDistanceM'> = {
   '--max-hr': 'maxHR',
+  '--split-distance': 'splitDistanceM',
   '--elevation-threshold': 'elevationThresholdM',
 }
 
@@ -53,12 +58,13 @@ export function parseArgs(argv: string[]): CliAction {
   let filePath: string | undefined
   let units: 'metric' | 'imperial' = 'metric'
   let json = false
-  const numeric: { maxHR?: number; elevationThresholdM?: number } = {}
+  const numeric: { maxHR?: number; elevationThresholdM?: number; splitDistanceM?: number; pauseDetection?: 'speed' } = {}
 
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i]
 
     if (arg === '--imperial') { units = 'imperial'; continue }
+    if (arg === '--speed-pauses') { numeric.pauseDetection = 'speed'; continue }
     if (arg === '--json') { json = true; continue }
 
     // --flag value and --flag=value are both accepted.
@@ -103,42 +109,52 @@ export function formatStats(
   units: 'metric' | 'imperial' = 'metric',
 ): string {
   const lines: string[] = []
+  const timingAvailable = stats.quality?.timingSource !== 'unavailable'
+  // Sparse analyses have no recorded distance interval even when their
+  // legacy distance source is computed/device. Real stationary edges do.
+  const distanceAvailable = stats.distanceSource !== 'unavailable' && timingAvailable
+  const movementAvailable = stats.movingTimeSource !== 'unavailable' && timingAvailable
+  const paceAvailable = distanceAvailable && movementAvailable && stats.distanceM > 0 && stats.avgPaceSecPerKm > 0
 
   lines.push(`\n🏃 @alosha/stride — ${name}\n`)
 
-  lines.push(`  Distance:      ${formatDistance(stats.distanceM, units)}`)
-  lines.push(`  Moving time:   ${formatDuration(stats.movingTimeSec)}`)
-  lines.push(`  Elapsed time:  ${formatDuration(stats.elapsedTimeSec)}`)
-  lines.push(`  Avg pace:      ${formatPace(stats.avgPaceSecPerKm, units)}`)
+  lines.push(`  Distance:      ${distanceAvailable ? formatDistance(stats.distanceM, units) : 'Unavailable'}`)
+  lines.push(`  Moving time:   ${movementAvailable ? formatDuration(stats.movingTimeSec) : 'Unavailable'}`)
+  lines.push(`  Elapsed time:  ${timingAvailable ? formatDuration(stats.elapsedTimeSec) : 'Unavailable'}`)
+  lines.push(`  Avg pace:      ${paceAvailable ? formatPace(stats.avgPaceSecPerKm, units) : 'Unavailable'}`)
   if (stats.bestKmPaceSecPerKm) {
     lines.push(`  Best km pace:  ${formatPace(stats.bestKmPaceSecPerKm, units)}`)
   }
   lines.push(`  Elevation ↑:   ${formatElevation(stats.elevationGainM, units)}`)
   lines.push(`  Elevation ↓:   ${formatElevation(stats.elevationLossM, units)}`)
-  if (stats.avgHeartRate) {
+  if (stats.avgHeartRate != null) {
     lines.push(`  Avg HR:        ${stats.avgHeartRate} bpm`)
+  }
+  if (stats.maxHeartRate != null) {
     lines.push(`  Max HR:        ${stats.maxHeartRate} bpm`)
   }
-  if (stats.avgCadence) {
+  if (stats.avgCadence != null) {
     lines.push(`  Avg cadence:   ${stats.avgCadence} spm`)
   }
 
   if (stats.splits.length > 0) {
-    // Splits are always kilometre splits — the boundaries are 1000 m whatever
-    // the display units. Under --imperial the pace, distance and elevation all
-    // convert, so the `km N` row label needs the header to explain itself.
-    lines.push(units === 'imperial' ? '\n  Splits (per kilometre):' : '\n  Splits:')
+    // Display units do not change the configured split boundaries.
+    lines.push((stats.splitDistanceM ?? 1000) !== 1000 ? `\n  Splits (every ${stats.splitDistanceM} m):` : units === 'imperial' ? '\n  Splits (per kilometre):' : '\n  Splits:')
     for (const split of stats.splits) {
       const hr = split.avgHeartRate ? `  HR ${split.avgHeartRate}bpm` : ''
       const elev = split.elevationGainM > 0 ? `  ↑${formatElevation(split.elevationGainM, units)}` : ''
-      // A trailing partial split (distanceM !== 1000) is labelled with its
-      // real distance — same convention as the chart builders — so a 720m
-      // remainder never reads as a full kilometre.
-      const partial = split.distanceM !== 1000 ? `  (${formatDistance(split.distanceM, units)})` : ''
-      lines.push(`    km ${split.km.toString().padStart(2)}  ${formatPace(split.paceSecPerKm, units)}${partial}${elev}${hr}`)
+      // Full mile splits can round to different integer metre lengths.
+      const partial = (split.isPartial ?? split.distanceM !== 1000) ? `  (${formatDistance(split.distanceM, units)})` : ''
+      const label = (stats.splitDistanceM ?? 1000) === 1000 ? 'km' : stats.splitDistanceM === 1609.344 ? 'mi' : 'Split'
+      lines.push(`    ${label} ${split.km.toString().padStart(2)}  ${formatPace(split.paceSecPerKm, units)}${partial}${elev}${hr}`)
     }
   }
 
+  if (stats.quality) {
+    lines.push(`\n  Timing source: ${stats.quality.timingSource}`)
+    lines.push(`  Moving source: ${stats.movingTimeSource}`)
+    if (stats.quality.warnings.length) lines.push(`  Data quality:  ${stats.quality.warnings.join(', ')}`)
+  }
   lines.push('')
   return lines.join('\n')
 }

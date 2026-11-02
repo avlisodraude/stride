@@ -1,7 +1,7 @@
 # Metrics Correctness Specification
 
-**Status:** Proposed
-**Applies to:** `src/analyzer.ts` (`analyze()` @ line 49, `hrZones()` @ line 25) and `src/types.ts`
+**Status:** Implemented through 3.0.0. Historical defect descriptions below explain the original fixes; current extensions and migration documentation define subsequent behavior.
+**Applies to:** `src/analyzer.ts`, `src/geo.ts`, `src/parser.ts`, `src/charts.ts` and `src/types.ts`. Historical line references describe the original implementation.
 **Audience:** the implementing agent. The worked examples in this document are **normative fixtures** — the implementation must reproduce them exactly, and must not substitute its own invented inputs or outputs.
 
 ---
@@ -60,8 +60,8 @@ Source: Garmin, *About Heart Rate Zones* (Forerunner owner's manual). See refere
 ### 1.5 Edge cases (precise)
 
 1. **First point.** Point 0 has no preceding segment, so it contributes **zero** duration. Its HR value is never attributed on its own; it only matters as the *start* of segment 1, whose duration is attributed to point 1. (Under the ending-sample rule the first sample's HR is simply never weighted. This is correct: a single instant has zero duration.)
-2. **Missing or non-monotonic timestamp on a segment.** If either endpoint lacks a timestamp, or `curr.timestamp - prev.timestamp <= 0`, that segment's duration is **0** for zone weighting — skip it, contributing nothing to any zone. Do **not** fall back to `1` here (the `analyzer.ts:99` `segTimeSec = 1` clamp exists to protect *pace/speed* division from divide-by-zero; it must not leak into time-in-zone, where it would re-introduce the count bias for exactly the corrupt segments). A segment with a missing HR sample at its ending point is likewise skipped for zones (no zone to attribute to).
-3. **File with no timestamps at all.** The parser leaves `timestamp` undefined, and `segTimeSec` defaults to `1` for pace. For zones, detect the whole-activity no-timestamp case and **fall back to 1 s per segment** (i.e. count-weighting), because with no time information sample-count is the only available proxy. In this one case the corrected result equals the old count-based result — but it is now honestly labelled "1 s assumed per sample," and every timestamped file (the overwhelming majority) is fixed. Document this fallback in the field doc.
+2. **Missing timestamp on a segment.** If either endpoint lacks a timestamp, that segment's duration is **0** for zone weighting — skip it, contributing nothing to any zone. A missing HR sample at the ending point likewise contributes no zone duration. Pace, splits and elapsed time interpolate interior timestamp gaps by cumulative distance between recorded anchors (by sample index for a stationary gap); HR zones continue using only the original timestamps. Partially timed activities require timestamps at both endpoints of each continuous recorded span; interpolation never crosses a span boundary. Backward clocks and distance covered in zero time reject the activity; a stationary segment with equal timestamps contributes zero duration. No isolated corrupt segment is clamped to one second.
+3. **File with no timestamps at all.** Pace, splits, elapsed time and zones **fall back to 1 s per recorded interval** (i.e. count-weighting, excluding span boundaries), because with no time information sample-count is the only available proxy. These are estimates under the documented assumption, not recorded durations.
 
 ### 1.6 Worked example — HR zones
 
@@ -133,6 +133,11 @@ timeAt(x) = cumTime[i-1] + f * (cumTime[i] - cumTime[i-1])
 
 The fastest 1000 m window is `min over s in [0, total-1000] of ( timeAt(s+1000) - timeAt(s) )`.
 
+At repeated cumulative distances, best-effort windows use the **last** time
+at their starting distance (departure) and the **first** time at their ending
+distance (arrival). This excludes pauses outside the effort while preserving
+pauses inside it. Splits retain the activity's initial/final stationary time.
+
 The minimum of that continuous function is attained at a **breakpoint** — a window position where either edge coincides with a recorded point. So it is not necessary to scan continuously: evaluate the window at the finite candidate set
 
 ```
@@ -176,6 +181,39 @@ Interpolation at 400 m is essential — there is no recorded point there. Rollin
 
 ---
 
+### 2.6 Discontinuous recorded spans
+
+GPX track/segment breaks, every TCX Track boundary (also across laps), and
+gaps caused by discarded GPX fixes or unusable TCX records are represented
+by `TrackPoint.segmentStart` on the
+first usable point of each later span. The edge into that point contributes
+no distance, movement duration, HR/cadence weight or elevation change. Device
+distance streams may reset at a marked boundary; rebase each span before
+adding its recorded progress. Reset elevation hysteresis at every boundary.
+
+Wall-clock elapsed time includes gaps between recorded spans. Moving time and
+split pace use the sum of recorded-span durations, including stationary time
+within a span for split pace. Best-kilometre windows must fit wholly inside
+one span; an aggregate 1200 m made of two 600 m spans has no best kilometre.
+Comparisons with the fastest full split apply only to splits that fit inside
+one continuous span; an aggregate split can combine recorded progress across breaks.
+Profiles preserve gap markers even when sensor readings are missing at a
+boundary or downsampling omits boundary-adjacent points.
+
+Render each sampled span in a separate Chart.js dataset, with a shared numeric
+distance axis. Do not insert null entries into object-coordinate datasets:
+the actual browser checks cover the renderer's parsing and line segmentation.
+
+Sensor dropouts split profile runs before sampling, independently per field.
+Time-axis profiles also split when a reading lacks its required timestamp.
+Select first/last readings plus the minimum and maximum from each of 99
+consecutive interior buckets when more than 200 readings exist. Deduplicate
+indices and retain original order. Global extrema survive, while the sum of
+all dataset lengths stays at most 200. Span IDs survive sampling even when
+boundary-adjacent points or whole short spans are omitted, so no selected
+points reconnect across a dropout or route break. Render singleton datasets
+with nonzero-radius markers.
+
 ## 3. Split accounting — trailing partial split
 
 ### 3.1 The defect
@@ -184,7 +222,7 @@ The final partial split is discarded. A 10.9 km run emits 10 splits and drops th
 
 ### 3.2 Specification
 
-- **Emit the trailing partial split.** After the last full-km boundary, if `total - lastMark > 0`, append one final `Split` covering the remainder.
+- **Emit only positive rounded splits.** Partition `Math.round(total)` into full 1000 m splits and a positive integer-metre remainder. Compute the final represented split through the actual unrounded endpoint, retaining all of its duration and sensor/elevation contributions. Normalize pace using the actual covered distance.
 - **`Split` gains a `distanceM` field** so consumers can tell a partial from a full km. Every split (full or partial) carries its `distanceM`; full kilometres carry `distanceM: 1000` (see §4), the trailing one carries the remainder. Its `paceSecPerKm` is normalised to a kilometre: `pace = remainderTimeSec / (remainderM / 1000)`, so a partial split's pace is directly comparable to a full one.
 - **Invariant (normative):** `sum(splits[i].distanceM) === round(distanceM)`. This is the acceptance test for §3 and §4 together.
 - **Best-km:** the trailing partial is **not** eligible for `bestKmPaceSecPerKm` (§2.4) — only full 1000 m windows are.
@@ -192,8 +230,8 @@ The final partial split is discarded. A 10.9 km run emits 10 splits and drops th
 
 ### 3.3 Edge cases
 
-- **Exact multiple of 1000 m** (e.g. 3000.0 m): no trailing partial; last full km ends exactly at `total`. Use a small epsilon (`total - lastMark > 1e-6`) so floating-point dust does not emit a spurious 0 m split.
-- **Total < 1000 m:** no full split; emit a single partial split covering the whole activity, `km: 1`, `distanceM: round(total)`. (Today this run has an empty `splits[]`; the invariant now requires the partial.)
+- **Exact or rounded multiple of 1000 m** (e.g. 3000.0 m or 3000.2 m): no zero-metre trailing split. Fold any tail rounding to zero into the final represented split, including its time, HR and elevation. If the entire distance rounds to zero, emit no splits.
+- **Total < 1000 m:** if the total rounds to a positive number, emit one split covering the whole recorded distance, `km: 1`, `distanceM: round(total)`. A total rounding to zero emits none.
 - **`km` numbering:** the partial split takes the next integer `km` index (a 2500 m run yields `km: 1, 2, 3` where `km: 3` is the 500 m partial). It is identified as partial by `distanceM !== 1000`, not by a separate flag.
 
 ### 3.4 Worked example — trailing partial split
@@ -235,15 +273,19 @@ On crossing 1000 m the code sets `splitDistM = 0` (`analyzer.ts:136`), **discard
 Split at **exact 1000 m marks** using the interpolation of §2.3, carrying the overshoot forward:
 
 ```
-mark = 0
-while mark + 1000 <= total:
-    t0 = timeAt(mark);  t1 = timeAt(mark + 1000)
-    emit Split { km, distanceM: 1000, paceSecPerKm: round(t1 - t0), ... }
-    mark += 1000
-# trailing partial per §3
+roundedTotal = round(total)
+for mark in range(0, roundedTotal, 1000):
+    end = total if mark + 1000 >= roundedTotal else mark + 1000
+    t0 = timeAt(mark); t1 = timeAt(end)
+    emit Split {
+        km,
+        distanceM: min(1000, roundedTotal - mark),
+        paceSecPerKm: round((t1 - t0) / ((end - mark) / 1000)),
+        ...
+    }
 ```
 
-Per-split **elevation gain** and **average HR** should likewise be accumulated to the true km boundary. HR is naturally handled by weighting samples within `[mark, mark+1000)`; elevation gain per split should use the **smoothed** series of §5 (a split's gain is a slice of the activity's smoothed gain), not raw deltas — otherwise per-split gains will not sum to `elevationGainM`. Interpolating HR/elevation exactly at the metre mark is unnecessary precision; attributing whole segments to the split that contains the segment's *ending* point (consistent with §1.2) is sufficient, provided the same rule is used for the total so the parts sum to the whole.
+Per-split **average HR** uses the ending sample's value weighted by the overlap of its recorded interval with each split's time range. An interval crossing a kilometre boundary contributes proportionally to both splits; stationary intervals follow the same time ranges. Only durations covered by an HR reading enter the denominator. Missing original timestamps contribute no sensor weight (even if pace interpolates them); completely untimed files assume one second per recorded interval. Activity average HR and cadence use the same ending-sample weighting and return null when no sensor-covered duration exists. Per-split **elevation gain** continues to attribute the hysteresis gain to the split containing the ending point, folding rounded-away tails into the last split.
 
 - **Invariant:** full splits each have `distanceM === 1000`; with the §3 trailing partial, `sum(distanceM) === round(distanceM_total)`.
 
@@ -363,15 +405,15 @@ Chosen output: **3 m** (raw was 8 m). Direction: **down**, as it will be for ess
 
 ### 5.6 Preferring the device's own total — and the split inconsistency it creates
 
-Step 1 of §5.3 is now implemented: when a FIT file carries a device-computed `session.total_ascent` / `total_descent`, `analyze()` reports **that** as `elevationGainM` / `elevationLossM` and sets `elevationSource: 'device'`. The hysteresis filter (steps 2–3) is the fallback, used for GPX and TCX always, and for FIT files whose session message omits the field (`elevationSource: 'computed'`). This is the preferred path precisely because the device total is barometric or sensor-fused, filtered on-device, and is the figure Garmin Connect and Strava will agree with — whereas hysteresis is a denoising of *GPS* altitude, which never saw the pressure signal.
+Ascent and descent resolve independently. Each usable device total overrides that direction's hysteresis total; a missing, non-finite, negative or contradictory-zero total falls back only for that direction. `elevationGainSource` and `elevationLossSource` report the individual decisions. `elevationSource` is `device` or `computed` when both agree, and `mixed` when they differ. GPX and TCX use computed totals for both directions. Sparse tracks still report available activity-level device totals.
 
 Two consequences are deliberate and must not be "fixed":
 
 - **The device total can be *larger* than the hysteresis figure, not just smaller.** §6 notes elevation "always drops or is unchanged" — that is true only of the *hysteresis fix relative to the old raw-delta sum*. Switching to the device total is a different operation: a barometric altimeter picks up rollers that GPS altitude flattens into noise, so `elevationSource: 'device'` can report *more* gain than the same activity's hysteresis pass would. Do not assume elevation only ever decreases.
 
-- **When `elevationSource === 'device'`, `sum(splits[].elevationGainM) !== elevationGainM`.** The device gives a single activity-level scalar; it does not tell us how the ascent is distributed over distance, so it **cannot** be attributed to individual splits. `splits[].elevationGainM` therefore keeps using the per-point hysteresis pass (§4.2/§5.4) — the only elevation signal that can be sliced by a distance range — while the activity total comes from the device. The parts will not sum to the whole, and that is correct: they are answering two different questions with two different instruments. **Do not** rescale the splits to force them to add up (that would fabricate a per-split distribution the device never reported), and **do not** switch the total back to the hysteresis sum to make them agree (that would throw away the better number). The `elevationSource` field is the signal that tells a consumer which regime it is in; when it reads `'device'`, per-split gains are a GPS-derived breakdown that is internally consistent with itself but not with the barometric total.
+- **When `elevationGainSource === 'device'`, split gains need not sum to `elevationGainM`.** The device gives a single activity-level scalar; it does not tell us how the ascent is distributed over distance, so it **cannot** be attributed to individual splits. `splits[].elevationGainM` therefore keeps using the per-point hysteresis pass (§4.2/§5.4) — the only elevation signal that can be sliced by a distance range — while the activity total comes from the device. The parts will not sum to the whole, and that is correct: they are answering two different questions with two different instruments. **Do not** rescale the splits to force them to add up (that would fabricate a per-split distribution the device never reported), and **do not** switch the total back to the hysteresis sum to make them agree (that would throw away the better number). The `elevationSource` field is the signal that tells a consumer which regime it is in; when it reads `'device'`, per-split gains are a GPS-derived breakdown that is internally consistent with itself but not with the barometric total.
 
-  A zero-guard protects the one case where the device figure is untrustworthy: a `total_ascent` of `0` on a track that plainly climbs (a raw altitude stream is present *and* the hysteresis pass already found nonzero gain) is a device that never populated the field, not a flat run — so it falls back to `'computed'`. A `0` with no altitude stream, or with a hysteresis gain of `0`, is a genuinely flat activity and the device's `0` is honoured.
+  A zero-guard applies independently: a device ascent/descent of `0` contradicting a confirmed hysteresis rise/fall falls back for that direction only. A `0` with no altitude stream, or with a matching hysteresis total of `0`, is honoured. Missing descent never becomes a fabricated zero because ascent was available, and a descent-only device total is retained.
 
 ---
 
@@ -395,7 +437,7 @@ Every one of these alters output users have already seen in `≤ 0.2.2`. This se
 
 ---
 
-## 7. Versioning
+## 7. Historical versioning rationale
 
 **Recommendation: this is a major version bump (`1.0.0`).**
 
@@ -428,3 +470,58 @@ Primary / authoritative sources only.
 ## Appendix A — Fixture provenance
 
 All worked-example distances are generated on the equator (`lat = 0`) so that haversine distance is `lon_deg × 111 194.93 m`. **That constant is `R · π/180` for the spherical `R = 6 371 000 m` used by `haversine()` in `src/analyzer.ts:7` — it is *not* the WGS84 equatorial figure of 111 319.49 m.** Using the WGS84 value to recompute these fixtures yields distances ~0.7–1.6 m larger and will make the examples below appear wrong; they are not. The `lon` values quoted (7 decimal places) reproduce the stated cumulative distances against the code's own constant to within 0.01 m (verified: p0→p1 = 599.997 m, p1→p2 = 800.003 m). The current-vs-corrected outputs in §§1.6, 2.5, 3.4, 4.3, 5.5 were computed, not estimated, and are the **normative** expected values for the implementation's test fixtures. An example whose output the implementer changes is a spec violation, not a judgement call. The current-vs-corrected outputs in §§1.6, 2.5, 3.4, 4.3, 5.5 were computed, not estimated, and are the **normative** expected values for the implementation's test fixtures. An example whose output the implementer changes is a spec violation, not a judgement call.
+
+## Current extension: quality, indoor records, timers and custom splits
+
+This section extends the default-kilometre examples above. Existing worked
+examples remain unchanged when using the default 1000 m length and files
+without usable FIT timer events.
+
+- Coordinates are optional together for FIT/TCX samples. Sensor readings and
+  device distance survive absent/invalid GPS. GPX points require valid positions.
+  A computed GPS distance edge needs two positions; never bridge a missing fix.
+  Distance can be unavailable, or incomplete with unknown intervals counted.
+  Best-km is null with unknown-distance intervals. Sensor weighting is unchanged.
+- Quality reports distinguish recorded, interpolated, assumed (1 second per
+  recorded edge) and unavailable timing. Parser counts expose invalid positions,
+  dropped records/readings and timer messages. Device-distance fallbacks name
+  missing, incomplete, invalid, decreasing or all-zero streams. Elevation gain
+  and loss separately name missing, invalid or contradictory-zero totals.
+- FIT timer events normalize start and stop/stopAll/stopDisable/stopDisableAll.
+  Events must be finite, chronological, supported, in group 0 (or unspecified),
+  and alternate start/stop, starting no later than the first point, with a
+  closed final interval. Otherwise timer timing falls back explicitly. Every
+  recorded span needs endpoint timestamps. Timer duration is the intersection
+  of active intervals with those spans, never time in unrecorded gaps.
+- Auto pause detection uses valid timer duration as moving time; this may
+  include standing. Speed mode retains the threshold policy, while timer time
+  remains separately reported. Best-km, split timing and sensor weights retain
+  elapsed recorded-span timing, including recorded pauses.
+- `splitDistanceM` is finite and at least 1; default 1000. Boundaries are exact
+  multiples of that length; reported distances are differences of rounded
+  cumulative boundaries. Zero-distance tails fold into the last split with
+  their time and sensors. `index` is one-based; `km` remains its legacy alias.
+  `isPartial` identifies a shorter rounded final boundary; use this flag rather
+  than testing distance against 1000. At most 100,000 splits may be allocated.
+- Sensor-only activities expose unavailable distance, zero distance/pace and
+  empty splits, while retaining elapsed time and sensor summaries. Profile
+  charts use elapsed minutes, or sample indices for completely untimed input.
+  These zero values must be interpreted together with quality and provenance.
+
+
+## Calendar validation and sparse output
+
+For supported XML dateTimes (four-digit positive years), validate month length,
+Gregorian leap years, clock fields and offsets against the written calendar
+before conversion. Invalid timestamps are omitted and counted as discarded
+readings; existing interpolation and endpoint requirements then apply. Never
+normalize a nonexistent day into a later month. Retain fractions, explicit
+zones and valid end-of-day midnight. Zone-less values retain local-time
+interpretation. FIT decoded Date objects need only retain finite-time validation.
+
+Maximum HR uses every valid recorded sample, including an activity with exactly
+one reading. That sample cannot establish duration-weighted averages or zones.
+CLI text displays a known maximum independently of average HR. It labels missing
+distance, elapsed/moving time and pace `Unavailable`, using quality/source fields;
+recorded stationary distance/time remain zero. No positive distance/pace estimate
+means no displayable pace. JSON retains the existing numeric fields and provenance.

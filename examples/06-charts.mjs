@@ -22,7 +22,7 @@ const zones = hrZonesChartConfig(stats)
 const splits = splitsChartConfig(stats)
 
 console.log(`pace:      type=${pace.type}, labels=[${pace.data.labels.join(', ')}]`)
-console.log(`elevation: type=${elevation.type}, ${elevation.data.labels.length} points`)
+console.log(`elevation: type=${elevation.type}, ${elevation.data.datasets[0].data.length} points`)
 console.log(`hrZones:   type=${zones.type}, data=[${zones.data.datasets[0].data.join(', ')}]`)
 console.log(`splits:    type=${splits.type}, labels=[${splits.data.labels.join(', ')}]`)
 
@@ -33,6 +33,6 @@ console.log(`splits:    type=${splits.type}, labels=[${splits.data.labels.join('
 // Output (node examples/06-charts.mjs, after npm run build at the repo root):
 //
 // pace:      type=line, labels=[km 1, km 2 (0.98 km)]
-// elevation: type=line, 201 points
+// elevation: type=line, 200 points
 // hrZones:   type=doughnut, data=[0, 147, 184, 269, 0]
 // splits:    type=bar, labels=[km 1, km 2 (0.98 km)]

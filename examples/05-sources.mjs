@@ -15,11 +15,13 @@ for (const name of ['sample-run.tcx', 'climb-run.fit', 'gpx-climb.gpx']) {
 
   if (stats.distanceSource === 'device') {
     console.log(`  distance ${stats.distanceM} m — from the device's own distance stream`)
+  } else if (stats.distanceSource === 'unavailable') {
+    console.log('  distance unavailable — see stats.quality for coverage')
   } else {
     console.log(`  distance ${stats.distanceM} m — summed haversine over GPS points`)
   }
 
-  if (stats.elevationSource === 'device') {
+  if (stats.elevationGainSource === 'device') {
     // Device total: activity-level scalar. Splits keep the GPS-derived pass,
     // so they will NOT sum to this — deliberate; see the README.
     const splitSum = stats.splits.reduce((a, s) => a + s.elevationGainM, 0)

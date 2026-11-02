@@ -24,6 +24,8 @@ switch (action.kind) {
       const activity = parse(action.filePath)
       const stats = analyze(activity, {
         maxHR: action.maxHR,
+        splitDistanceM: action.splitDistanceM,
+        pauseDetection: action.pauseDetection,
         elevationThresholdM: action.elevationThresholdM,
       })
       if (action.json) {
