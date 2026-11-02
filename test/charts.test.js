@@ -41,79 +41,73 @@ describe('paceChartConfig', () => {
   })
 })
 
-describe('elevationChartConfig', () => {
-  test('line chart with one dataset, y = elevation in metres, matching labels length', () => {
-    const config = elevationChartConfig(activity, stats)
-
-    expect(config.type).toBe('line')
-    expect(config.data.datasets.length).toBe(1)
-
+describe.each([
+  ['elevation', elevationChartConfig, 2, 14],
+  ['heartRate', heartRateChartConfig, 120, 163],
+])('%s profile', (field, build, min, max) => {
+  test('plots numeric distance on a linear axis and preserves the full route', () => {
+    const config = build(activity, stats)
     const data = config.data.datasets[0].data
-    expect(data.length).toBeGreaterThan(0)
-    expect(config.data.labels.length).toBe(data.length)
-
-    // Fixture's raw elevation samples range 2-14m; sampled/downsampled points
-    // must stay within that envelope and never be undefined.
-    data.forEach(v => {
-      expect(v).not.toBeUndefined()
-      expect(v).toBeGreaterThanOrEqual(2)
-      expect(v).toBeLessThanOrEqual(14)
-    })
-  })
-
-  // Regression guard for the flat-earth + decimated-cumulative-sum bug: the
-  // chart's own distance maths must agree with analyze()'s, not drift from
-  // it (they used to disagree by ~60% on this fixture).
-  test('final x-axis label matches stats.distanceM, to within the label\'s own rounding', () => {
-    const config = elevationChartConfig(activity, stats)
-    const lastLabel = config.data.labels[config.data.labels.length - 1]
-    const labelKm = parseFloat(lastLabel)
-
-    expect(lastLabel.endsWith('km')).toBe(true)
-    // Label is rounded to one decimal place (100m), so allow up to 50m of
-    // rounding slack on either side.
-    expect(Math.abs(labelKm * 1000 - stats.distanceM)).toBeLessThanOrEqual(50)
-  })
-})
-
-describe('heartRateChartConfig', () => {
-  test('line chart with one dataset, y = heart rate in bpm, matching labels length', () => {
-    const config = heartRateChartConfig(activity, stats)
-
     expect(config.type).toBe('line')
-    expect(config.data.datasets.length).toBe(1)
-
-    const data = config.data.datasets[0].data
+    expect(config.options.scales.x.type).toBe('linear')
     expect(data.length).toBeGreaterThan(0)
-    expect(config.data.labels.length).toBe(data.length)
-
-    // Fixture's raw HR samples range 120-163bpm.
-    data.forEach(v => {
-      expect(v).not.toBeUndefined()
-      expect(v).toBeGreaterThanOrEqual(120)
-      expect(v).toBeLessThanOrEqual(163)
-    })
+    expect(data.length).toBeLessThanOrEqual(200)
+    for (const point of data) {
+      expect(point.y).toBeGreaterThanOrEqual(min)
+      expect(point.y).toBeLessThanOrEqual(max)
+    }
+    expect(Math.abs(data.at(-1).x * 1000 - stats.distanceM)).toBeLessThanOrEqual(0.5)
   })
 
-  // The x-axis is distance, not sample index: smart-recording watches sample
-  // unevenly, so an index axis would stretch hard sections and compress easy
-  // ones. Same guard as the elevation chart — the axis must agree with
-  // stats.distanceM.
-  test('x-axis is distance and its final label matches stats.distanceM', () => {
-    const config = heartRateChartConfig(activity, stats)
-    const lastLabel = config.data.labels[config.data.labels.length - 1]
-    const labelKm = parseFloat(lastLabel)
-
-    expect(lastLabel.endsWith('km')).toBe(true)
-    // Label is rounded to one decimal place (100m), so allow up to 50m of
-    // rounding slack on either side.
-    expect(Math.abs(labelKm * 1000 - stats.distanceM)).toBeLessThanOrEqual(50)
+  test('imperial units convert distance and elevation values', () => {
+    const metric = build(activity, stats).data.datasets[0].data
+    const imperial = build(activity, stats, { units: 'imperial' }).data.datasets[0].data
+    expect(imperial.at(-1).x).toBeCloseTo(metric.at(-1).x / 1.609344, 6)
+    expect(imperial[0].y).toBeCloseTo(metric[0].y * (field === 'elevation' ? 3.28084 : 1), 6)
   })
 
-  test('imperial units convert the x-axis labels to miles', () => {
-    const config = heartRateChartConfig(activity, stats, { units: 'imperial' })
-    const lastLabel = config.data.labels[config.data.labels.length - 1]
-    expect(lastLabel.endsWith('mi')).toBe(true)
+  test('missing readings do not move the route origin or shortcut corners', () => {
+    // The unmeasured middle point is a right-angle corner: summing the
+    // sensor-only coordinates would cut diagonally across it.
+    const points = [
+      { lat: 0, lon: 0 },
+      { lat: 0, lon: 0.01, [field]: 100 },
+      { lat: 0.01, lon: 0.01 },
+      { lat: 0.01, lon: 0.02, [field]: 110 },
+    ]
+    const sparse = { format: 'gpx', points }
+    const sparseStats = analyze(sparse)
+    const data = build(sparse, sparseStats).data.datasets.flatMap(dataset => dataset.data)
+    expect(data[0].x).toBeCloseTo(1.111949, 5)
+    expect(Math.abs(data.at(-1).x * 1000 - sparseStats.distanceM)).toBeLessThanOrEqual(0.5)
+  })
+
+  test('device distances keep missing first/last readings at their real positions', () => {
+    const sparse = { format: 'fit', points: [100, 1100, 2100, 3100, 4100].map((distanceM, i) => ({
+      lat: 0, lon: i / 100, distanceM, ...(i > 0 && i < 4 ? { [field]: 100 + i } : {}),
+    })) }
+    const data = build(sparse, analyze(sparse)).data.datasets[0].data
+    expect(data.map(p => p.x)).toEqual([1, 2, 3])
+  })
+
+  test('keeps unequal distances and nearby points distinct', () => {
+    const sparse = { format: 'fit', points: [0, 10, 1000].map((distanceM, i) => ({
+      lat: 0, lon: i / 100, distanceM, [field]: 100 + i,
+    })) }
+    const data = build(sparse, analyze(sparse)).data.datasets[0].data
+    expect(data.map(p => p.x)).toEqual([0, 0.01, 1])
+  })
+
+  test.each([0, 1, 199, 200, 201, 399, 1001])('bounds sampling for %i readings and keeps both endpoints', length => {
+    const sparse = { format: 'fit', points: Array.from({ length }, (_, i) => ({
+      lat: 0, lon: 0, distanceM: i * 10, [field]: i + 100,
+    })) }
+    const data = build(sparse, analyze(sparse)).data.datasets[0].data
+    expect(data.length).toBe(Math.min(200, length))
+    if (length > 0) {
+      expect(data[0].y).toBe(100)
+      expect(data.at(-1).y).toBe(length + 99)
+    }
   })
 })
 
@@ -141,9 +135,6 @@ describe('hrZonesChartConfig', () => {
     expect(total).toBe(stats.movingTimeSec)
   })
 
-  // KNOWN BUG: hrZonesChartConfig throws when stats.hrZones is null instead
-  // of returning a usable empty chart. Left failing and unskipped on
-  // purpose; charts.ts is fixed for this in the very next commit.
   test('handles an activity with no heart rate data (stats.hrZones === null) without throwing', () => {
     const noHrActivity = {
       points: [
@@ -175,11 +166,6 @@ describe('splitsChartConfig', () => {
     })
   })
 
-  // KNOWN BUG: the trailing partial split (fixture's last split is 983m, not
-  // 1000m) gets the exact same "km N" label as a full kilometre split, so the
-  // chart presents it as if a whole extra kilometre had been run. Left
-  // failing and unskipped on purpose; charts.ts is fixed for this in the
-  // very next commit.
   test('does not label the trailing partial split as if it were a full kilometre', () => {
     const lastSplit = stats.splits[stats.splits.length - 1]
     expect(lastSplit.distanceM).toBeLessThan(1000) // sanity: fixture ends on a partial

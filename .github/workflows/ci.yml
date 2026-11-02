@@ -14,7 +14,7 @@ jobs:
       # (>= 18) on every major we support.
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        node: [18, 20, 22, 24]
 
     name: Node ${{ matrix.node }}
     steps:
@@ -35,3 +35,28 @@ jobs:
       # verifies the package builds on every supported Node major.
       - name: Test
         run: npm test
+
+      - name: Verify packed package consumers
+        run: npm run test:package
+
+      - name: Run examples
+        run: npm run test:examples
+
+      - name: Check large-file performance
+        if: matrix.node == 22
+        run: npm run test:performance
+
+      - name: Install browser checks
+        if: matrix.node == 22
+        run: npm run browser:install -- --with-deps
+
+      - name: Render charts in Chromium
+        if: matrix.node == 22
+        run: npm run test:browser
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.node == 22 && always()
+        with:
+          name: browser-chart-checks
+          path: test-results/browser/
+          if-no-files-found: ignore

@@ -11,6 +11,8 @@
  */
 import esbuild from 'esbuild'
 import path from 'path'
+import { readFileSync } from 'node:fs'
+const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 // Emitted outside dist/ on purpose. This is a self-contained IIFE for
 // stride.alosha.dev/demo: it inlines @garmin/fitsdk and fast-xml-parser and
@@ -31,7 +33,7 @@ const browserFileInput = {
 }
 
 await esbuild.build({
-  entryPoints: ['src/index.browser.ts'],
+  stdin: { contents: "export * from './src/index.browser.ts'; export * from './src/charts.ts'", resolveDir: process.cwd() },
   bundle: true,
   format: 'iife',
   globalName: 'Stride',
@@ -40,7 +42,7 @@ await esbuild.build({
   minify: true,
   external: ['chart.js'],
   banner: {
-    js: '/* @alosha/stride browser bundle — built from src for stride.alosha.dev/demo. Do not edit. */',
+    js: `/* @alosha/stride@${version} browser bundle — built from src for stride.alosha.dev/demo. Do not edit. */`,
   },
   plugins: [browserFileInput],
   outfile,

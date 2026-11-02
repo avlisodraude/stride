@@ -1,5 +1,6 @@
 import { defineConfig } from 'tsup'
 import path from 'path'
+import { copyFile } from 'node:fs/promises'
 import type { Plugin as EsbuildPlugin } from 'esbuild'
 
 // Browser builds must never pull in Node's `fs`. Redirect the file-path
@@ -17,12 +18,27 @@ const browserFileInput: EsbuildPlugin = {
 export default defineConfig([
   {
     entry: ['src/index.ts'],
-    format: ['esm', 'cjs'],
+    format: ['esm'],
     dts: true,
     sourcemap: true,
     clean: true,
     target: 'node18',
     external: ['chart.js'],
+  },
+  {
+    entry: ['src/index.ts'],
+    format: ['cjs'],
+    dts: true,
+    sourcemap: true,
+    target: 'node18',
+    // Node 18 cannot require the SDK's ESM entry point. Compile it into
+    // this build while keeping the ESM/browser builds external as before.
+    noExternal: ['@garmin/fitsdk'],
+    external: ['chart.js'],
+    banner: { js: '/* Includes Garmin FIT SDK. Copyright Garmin International, Inc. See garmin-fitsdk.LICENSE.txt. */' },
+    onSuccess: async () => {
+      await copyFile('node_modules/@garmin/fitsdk/LICENSE.txt', 'dist/garmin-fitsdk.LICENSE.txt')
+    },
   },
   {
     entry: { 'index.browser': 'src/index.browser.ts' },

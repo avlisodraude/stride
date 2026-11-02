@@ -1,5 +1,5 @@
-import type { Activity, ActivityStats, Split, HeartRateZones } from './types.js'
-import { cumulativeDistanceSeries } from './geo.js'
+import type { Activity, ActivityStats, Split, HeartRateZones, DataQuality } from './types.js'
+import { cumulativeDistanceSeries, continuousRanges, deviceDistanceFallback, hasPosition } from './geo.js'
 
 // ---------------------------------------------------------------------------
 // HR zone helpers
@@ -20,8 +20,11 @@ export type HrZoneModel =
 export const DEFAULT_ZONE_BOUNDARIES: [number, number, number, number] = [0.6, 0.7, 0.8, 0.9]
 
 function validateZoneBoundaries(boundaries: [number, number, number, number]): void {
+  if (!Array.isArray(boundaries) || boundaries.length !== 4) {
+    throw new Error('Invalid HR zone boundaries: expected exactly four boundaries.')
+  }
   for (const b of boundaries) {
-    if (!(b > 0 && b < 1)) {
+    if (!Number.isFinite(b) || !(b > 0 && b < 1)) {
       throw new Error(
         `Invalid HR zone boundaries [${boundaries.join(', ')}]: each boundary must be strictly between 0 and 1 (got ${b}).`
       )
@@ -140,7 +143,7 @@ export const DEFAULT_ELEVATION_THRESHOLD_M = 8
 // with the same convention used for HR zones and splits) so callers can slice
 // the totals by distance range without re-running the filter.
 function elevationHysteresis(
-  points: { elevation?: number }[],
+  points: { elevation?: number; segmentStart?: boolean }[],
   thresholdM: number
 ): { gainAtPoint: number[]; lossAtPoint: number[]; totalGainM: number; totalLossM: number } {
   const gainAtPoint = new Array(points.length).fill(0)
@@ -150,6 +153,7 @@ function elevationHysteresis(
   let totalLossM = 0
 
   for (let i = 0; i < points.length; i++) {
+    if (points[i].segmentStart) ref = null
     const ele = points[i].elevation
     if (ele == null) continue
     if (ref == null) { ref = ele; continue }
@@ -177,18 +181,27 @@ function elevationHysteresis(
 // Elapsed time at cumulative distance `x`, linearly interpolated within the
 // segment that contains it. `cumDist`/`cumTime` must be non-decreasing and
 // the same length, with index 0 = the activity's start (0, 0).
-function timeAt(x: number, cumDist: number[], cumTime: number[]): number {
+function timeAt(
+  x: number, cumDist: number[], cumTime: number[],
+  edge: 'split' | 'arrival' | 'departure' = 'split',
+): number {
   const n = cumDist.length
-  if (x <= cumDist[0]) return cumTime[0]
-  if (x >= cumDist[n - 1]) return cumTime[n - 1]
+  // Splits retain the activity's initial/final stationary time. Best efforts
+  // start at departure and end at arrival, excluding pauses outside the effort.
+  if (edge === 'split') {
+    if (x <= cumDist[0]) return cumTime[0]
+    if (x >= cumDist[n - 1]) return cumTime[n - 1]
+  }
 
-  let lo = 1
-  let hi = n - 1
+  let lo = 0
+  let hi = n
   while (lo < hi) {
     const mid = (lo + hi) >> 1
-    if (cumDist[mid] < x) lo = mid + 1
+    if (cumDist[mid] < x || (edge === 'departure' && cumDist[mid] === x)) lo = mid + 1
     else hi = mid
   }
+  if (lo === 0) return cumTime[0]
+  if (lo === n) return cumTime[n - 1]
   const segLen = cumDist[lo] - cumDist[lo - 1]
   const f = segLen > 0 ? (x - cumDist[lo - 1]) / segLen : 0
   return cumTime[lo - 1] + f * (cumTime[lo] - cumTime[lo - 1])
@@ -213,60 +226,75 @@ function computeBestKmPaceSecPerKm(cumDist: number[], cumTime: number[]): number
 
   let best = Infinity
   for (const s of candidates) {
-    const windowTime = timeAt(s + 1000, cumDist, cumTime) - timeAt(s, cumDist, cumTime)
+    const windowTime = timeAt(s + 1000, cumDist, cumTime, 'arrival')
+      - timeAt(s, cumDist, cumTime, 'departure')
     if (windowTime < best) best = windowTime
   }
   return Math.round(best)
 }
 
-// Splits at exact 1000m marks, carrying any overshoot forward instead of
+// Splits at exact configured distance marks, carrying any overshoot forward instead of
 // resetting at the emitting segment's own (drifting) distance, plus a
-// trailing partial split for any remainder under 1000m (metrics-spec.md §3 +
-// §4). Per-split elevation gain and average HR are attributed to whichever
-// split contains each segment's *ending* point (same convention as HR zones,
-// §1.2), not interpolated — the spec calls exact interpolation there
-// unnecessary precision.
+// trailing partial split for any remainder below the configured length (metrics-spec.md §3 +
+// §4). Elevation gains follow ending points. HR uses the ending sample's
+// value weighted by the interval's overlap with each split's time range.
 function buildSplits(
-  pts: { heartRate?: number }[],
+  pts: { heartRate?: number; segmentStart?: boolean }[],
   cumDist: number[],
   cumTime: number[],
-  gainAtPoint: number[]
+  gainAtPoint: number[],
+  sensorWeights: number[],
+  splitDistanceM: number,
 ): Split[] {
   const total = cumDist[cumDist.length - 1]
   const splits: Split[] = []
-
-  let mark = 0
-  let km = 1
-  while (mark + 1000 <= total) {
-    const t0 = timeAt(mark, cumDist, cumTime)
-    const t1 = timeAt(mark + 1000, cumDist, cumTime)
-    splits.push({ km: km++, distanceM: 1000, paceSecPerKm: Math.round(t1 - t0), elevationGainM: 0 })
-    mark += 1000
+  const roundedTotal = Math.round(total)
+  // Rounded cumulative boundaries preserve total distance even for mile splits.
+  let numSplits = Math.ceil(total / splitDistanceM)
+  if (numSplits > 0 && Math.round((numSplits - 1) * splitDistanceM) >= roundedTotal) numSplits--
+  if (roundedTotal === 0) numSplits = 0
+  if (numSplits > 100_000) throw new Error('Too many splits: increase splitDistanceM (maximum 100000 splits).')
+  const times: { start: number; end: number }[] = []
+  for (let k = 0; k < numSplits; k++) {
+    const start = k * splitDistanceM
+    // Fold any sub-metre tail into the last represented split, retaining its
+    // time and sensor/elevation attribution. All emitted distances are > 0.
+    const end = k === numSplits - 1 ? total : start + splitDistanceM
+    const t0 = timeAt(start, cumDist, cumTime)
+    const t1 = timeAt(end, cumDist, cumTime)
+    splits.push({
+      km: k + 1, index: k + 1, targetDistanceM: splitDistanceM,
+      isPartial: Math.round(end) < Math.round(start + splitDistanceM),
+      distanceM: Math.round(end) - Math.round(start),
+      paceSecPerKm: Math.round((t1 - t0) / ((end - start) / 1000)), elevationGainM: 0,
+    })
+    times.push({ start: t0, end: t1 })
   }
 
-  // Trailing partial (§3.2/§3.3): epsilon guards against floating-point dust
-  // emitting a spurious 0m split when total is an exact multiple of 1000.
-  if (total - mark > 1e-6) {
-    const remainderM = total - mark
-    const remainderTimeSec = timeAt(total, cumDist, cumTime) - timeAt(mark, cumDist, cumTime)
-    const pace = remainderTimeSec / (remainderM / 1000)
-    splits.push({ km: km++, distanceM: Math.round(remainderM), paceSecPerKm: Math.round(pace), elevationGainM: 0 })
-  }
-
-  const numSplits = splits.length
   const hrSum = new Array(numSplits).fill(0)
-  const hrCount = new Array(numSplits).fill(0)
+  const hrWeight = new Array(numSplits).fill(0)
   const elevSum = new Array(numSplits).fill(0)
+  let firstSplit = 0
   for (let i = 1; i < cumDist.length; i++) {
-    const idx = Math.ceil(cumDist[i] / 1000) - 1
-    if (idx < 0 || idx >= numSplits) continue
+    if (numSplits === 0 || pts[i].segmentStart) continue
+    const idx = Math.max(0, Math.min(numSplits - 1, Math.ceil(cumDist[i] / splitDistanceM) - 1))
     elevSum[idx] += gainAtPoint[i]
     const hr = pts[i].heartRate
-    if (hr != null) { hrSum[idx] += hr; hrCount[idx]++ }
+    if (hr == null || sensorWeights[i] <= 0) continue
+    const t0 = cumTime[i - 1]
+    const t1 = cumTime[i]
+    while (firstSplit < numSplits && times[firstSplit].end <= t0) firstSplit++
+    // Split a sample's duration at the actual distance boundary rather than
+    // attributing an entire long interval to its ending split.
+    for (let k = firstSplit; k < numSplits && times[k].start < t1; k++) {
+      const overlap = Math.max(0, Math.min(t1, times[k].end) - Math.max(t0, times[k].start))
+      hrSum[k] += hr * overlap
+      hrWeight[k] += overlap
+    }
   }
   for (let k = 0; k < numSplits; k++) {
     splits[k].elevationGainM = Math.round(elevSum[k])
-    if (hrCount[k] > 0) splits[k].avgHeartRate = Math.round(hrSum[k] / hrCount[k])
+    if (hrWeight[k] > 0) splits[k].avgHeartRate = Math.round(hrSum[k] / hrWeight[k])
   }
 
   return splits
@@ -286,7 +314,7 @@ function buildSplits(
 // recorded between the first and last point (see Activity.deviceDistanceM
 // for why it's often larger, never smaller, when genuine).
 function resolveDeviceDistanceM(raw: number | undefined, pointStreamDistanceM: number): number | undefined {
-  if (raw == null || raw <= 0) return undefined
+  if (raw == null || !Number.isFinite(raw) || raw <= 0) return undefined
   if (raw < pointStreamDistanceM) return undefined
   return raw
 }
@@ -303,24 +331,23 @@ function resolveElevation(
   hystGainM: number,
   hystLossM: number,
   hasAltitudeStream: boolean,
-): { gainM: number; lossM: number; source: 'device' | 'computed' } {
-  const deviceGain = activity.deviceElevationGainM
-  if (deviceGain == null) {
-    return { gainM: hystGainM, lossM: hystLossM, source: 'computed' }
+): {
+  gainM: number; lossM: number; source: ActivityStats['elevationSource'];
+  gainSource: 'device' | 'computed'; lossSource: 'device' | 'computed';
+} {
+  const resolve = (raw: number | undefined, computed: number): { value: number; source: 'device' | 'computed' } => {
+    // A zero contradicting a confirmed rise/fall is a placeholder. Apply this
+    // guard independently so one missing or invalid total cannot erase the other.
+    const usable = raw != null && Number.isFinite(raw) && raw >= 0
+      && !(raw === 0 && hasAltitudeStream && computed > 0)
+    return usable ? { value: raw, source: 'device' } : { value: computed, source: 'computed' }
   }
-  // Zero-guard: a device total_ascent of 0 on a track that plainly climbs —
-  // a raw altitude stream is present *and* the hysteresis filter already
-  // found real gain — is a device that never populated the field, not a flat
-  // run, so fall back to the computed figure rather than report a false 0. A
-  // 0 with no altitude stream, or with a hysteresis gain of 0, is a genuinely
-  // flat activity and the device's 0 is honoured (source stays 'device').
-  if (deviceGain === 0 && hasAltitudeStream && hystGainM > 0) {
-    return { gainM: hystGainM, lossM: hystLossM, source: 'computed' }
-  }
+  const gain = resolve(activity.deviceElevationGainM, hystGainM)
+  const loss = resolve(activity.deviceElevationLossM, hystLossM)
   return {
-    gainM: deviceGain,
-    lossM: activity.deviceElevationLossM ?? 0,
-    source: 'device',
+    gainM: gain.value, lossM: loss.value,
+    source: gain.source === loss.source ? gain.source : 'mixed',
+    gainSource: gain.source, lossSource: loss.source,
   }
 }
 
@@ -332,11 +359,175 @@ export interface AnalyzeOptions {
   zoneModel?: HrZoneModel
   /** Speed (m/s) below which a segment counts as paused, not moving. Default 0.3. */
   pauseThresholdMps?: number
+  /** Metres per split: 1000 (default), 500, 1609.344 (mile), or custom >= 1. */
+  splitDistanceM?: number
+  /** Auto prefers coherent FIT timer events; speed retains threshold timing. */
+  pauseDetection?: 'auto' | 'speed'
+}
+
+function validatePoints(points: Activity['points']): void {
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]
+    if (p.segmentStart != null && typeof p.segmentStart !== 'boolean') {
+      throw new Error(`Invalid segmentStart at point ${i}: expected a boolean.`)
+    }
+    if ((p.lat != null || p.lon != null) && (!hasPosition(p) || !Number.isFinite(p.lat) || !Number.isFinite(p.lon) || Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180)) {
+      throw new Error(`Invalid coordinates at point ${i}: latitude must be within [-90, 90] and longitude within [-180, 180].`)
+    }
+    for (const field of ['elevation', 'heartRate', 'cadence'] as const) {
+      if (p[field] != null && !Number.isFinite(p[field])) {
+        throw new Error(`Invalid ${field} at point ${i}: expected a finite number.`)
+      }
+    }
+    if (p.heartRate != null && p.heartRate <= 0) throw new Error(`Invalid heartRate at point ${i}: expected a positive number.`)
+    if (p.cadence != null && p.cadence < 0) throw new Error(`Invalid cadence at point ${i}: expected a non-negative number.`)
+    if (p.timestamp != null && (!(p.timestamp instanceof Date) || !Number.isFinite(p.timestamp.getTime()))) {
+      throw new Error(`Invalid timestamp at point ${i}: expected a valid Date.`)
+    }
+  }
+}
+
+// Timing is never guessed as one second for an isolated corrupt segment.
+// Interior gaps are interpolated by distance between recorded anchors (by
+// index when the whole gap is stationary). Uncovered endpoints and backward
+// clocks cannot establish the activity's duration and are rejected explicitly.
+function cumulativeTimes(points: Activity['points'], cumDist: number[]): number[] {
+  const result = new Array<number>(points.length).fill(0)
+  if (points.every(p => p.timestamp == null)) {
+    for (let i = 1; i < points.length; i++) result[i] = result[i - 1] + (points[i].segmentStart ? 0 : 1)
+    return result
+  }
+  let offset = 0
+  let previousEnd: number | undefined
+  for (const { start, end } of continuousRanges(points)) {
+    if (points[start].timestamp == null || points[end].timestamp == null) {
+      throw new Error('Incomplete timing: first and last points of each continuous span must have timestamps when any timestamps are present.')
+    }
+    const startTime = points[start].timestamp.getTime()
+    if (previousEnd != null && startTime < previousEnd) throw new Error('Invalid timing: timestamps must never go backwards across spans.')
+    result[start] = offset
+    let anchor = start
+    for (let i = start + 1; i <= end; i++) {
+      if (points[i].timestamp == null) continue
+      const t0 = points[anchor].timestamp!.getTime()
+      const t1 = points[i].timestamp!.getTime()
+      const distance = cumDist[i] - cumDist[anchor]
+      if (t1 < t0 || (t1 === t0 && distance > 0)) {
+        throw new Error(`Invalid timing at point ${i}: timestamps must increase when distance increases and must never go backwards.`)
+      }
+      for (let j = anchor + 1; j <= i; j++) {
+        const fraction = distance > 0 ? (cumDist[j] - cumDist[anchor]) / distance : (j - anchor) / (i - anchor)
+        result[j] = offset + (t0 - startTime + fraction * (t1 - t0)) / 1000
+      }
+      anchor = i
+    }
+    offset = result[end]
+    previousEnd = points[end].timestamp.getTime()
+  }
+  return result
+}
+
+function weightedAverage(points: Activity['points'], weights: number[], field: 'heartRate' | 'cadence'): number | null {
+  let sum = 0
+  let weight = 0
+  for (let i = 1; i < points.length; i++) {
+    const value = points[i][field]
+    if (value == null || weights[i] <= 0) continue
+    sum += value * weights[i]
+    weight += weights[i]
+  }
+  return weight > 0 ? Math.round(sum / weight) : null
+}
+
+function bestContinuousKm(points: Activity['points'], cumDist: number[], cumTime: number[]): number | null {
+  let best: number | null = null
+  for (const { start, end } of continuousRanges(points)) {
+    if (cumDist[end] - cumDist[start] < 1000) continue
+    const distance = cumDist.slice(start, end + 1).map(d => d - cumDist[start])
+    const time = cumTime.slice(start, end + 1).map(t => t - cumTime[start])
+    const pace = computeBestKmPaceSecPerKm(distance, time)!
+    if (best == null || pace < best) best = pace
+  }
+  return best
+}
+
+function assessQuality(activity: Activity, source: ActivityStats['distanceSource']): DataQuality {
+  const pts = activity.points
+  const missingTimestamps = pts.filter(p => p.timestamp == null).length
+  const missingPositions = pts.filter(p => !hasPosition(p)).length
+  let unknownDistanceIntervals = 0
+  if (source !== 'device') {
+    for (let i = 1; i < pts.length; i++) {
+      if (!pts[i].segmentStart && (!hasPosition(pts[i - 1]) || !hasPosition(pts[i]))) unknownDistanceIntervals++
+    }
+  }
+  const timingSource = pts.length < 2 ? 'unavailable' : missingTimestamps === pts.length ? 'assumed'
+    : missingTimestamps > 0 ? 'interpolated' : 'recorded'
+  const fallback = deviceDistanceFallback(pts)
+  const warnings: string[] = []
+  if (timingSource === 'assumed') warnings.push('assumed-one-second-timing')
+  if (timingSource === 'interpolated') warnings.push('interpolated-timing')
+  if (missingPositions) warnings.push('missing-positions')
+  if (unknownDistanceIntervals) warnings.push('incomplete-distance')
+  if (source === 'unavailable') warnings.push('distance-unavailable')
+  if (fallback != null && fallback !== 'missing') warnings.push(`device-distance-${fallback}`)
+  const d = activity.parseDiagnostics
+  if (d?.droppedRecords) warnings.push('dropped-records')
+  if (d?.droppedReadings) warnings.push('dropped-readings')
+  if (d?.invalidPositions) warnings.push('invalid-positions')
+  return {
+    timingSource, missingTimestamps, missingPositions, unknownDistanceIntervals,
+    deviceDistanceFallback: fallback, timerFallback: 'missing',
+    elevationGainFallback: null, elevationLossFallback: null,
+    parseDiagnostics: d ? { ...d } : null, warnings,
+  }
+}
+
+type TimerRange = { start: number; end: number }
+
+function timerRanges(activity: Activity): { ranges: TimerRange[] | null; fallback: DataQuality['timerFallback'] } {
+  const events = activity.timerEvents ?? []
+  const invalid = { ranges: null, fallback: 'invalid' as const }
+  if (activity.parseDiagnostics?.droppedTimerEvents) return invalid
+  if (events.length === 0) return { ranges: null, fallback: 'missing' }
+  const pts = activity.points
+  if (pts.length < 2 || continuousRanges(pts).some(({ start, end }) => !pts[start].timestamp || !pts[end].timestamp)) {
+    return { ranges: null, fallback: 'untimed' }
+  }
+  const ranges: TimerRange[] = []
+  let start: number | null = null
+  let previous = -Infinity
+  for (const event of events) {
+    const time = event.timestamp instanceof Date ? event.timestamp.getTime() : NaN
+    if (!Number.isFinite(time) || time < previous || (event.group != null && event.group !== 0)) return invalid
+    previous = time
+    if (event.type === 'start' && start == null) start = time
+    else if (event.type === 'stop' && start != null) { ranges.push({ start, end: time }); start = null }
+    else return invalid
+  }
+  // Require a known initial state and a closed final interval. Malformed or
+  // truncated transitions must never silently turn into activity duration.
+  if (start != null || ranges.length === 0 || events[0].timestamp.getTime() > pts[0].timestamp!.getTime()) return invalid
+  return { ranges, fallback: null }
+}
+
+function timerDuration(points: Activity['points'], ranges: TimerRange[]): number {
+  let totalMs = 0
+  let first = 0
+  for (const { start, end } of continuousRanges(points)) {
+    const t0 = points[start].timestamp!.getTime()
+    const t1 = points[end].timestamp!.getTime()
+    while (first < ranges.length && ranges[first].end <= t0) first++
+    for (let i = first; i < ranges.length && ranges[i].start < t1; i++) {
+      totalMs += Math.max(0, Math.min(t1, ranges[i].end) - Math.max(t0, ranges[i].start))
+    }
+  }
+  return totalMs / 1000
 }
 
 export function analyze(activity: Activity, options?: AnalyzeOptions): ActivityStats
 /**
- * @deprecated positional arguments will be removed in 3.0.0; pass an options object
+ * @deprecated prefer an options object; positional arguments are retained for compatibility
  */
 export function analyze(activity: Activity, maxHR: number, elevationThresholdM?: number): ActivityStats
 export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3?: number): ActivityStats {
@@ -346,8 +537,18 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
     elevationThresholdM = DEFAULT_ELEVATION_THRESHOLD_M,
     zoneModel = { type: 'hrmax' as const },
     pauseThresholdMps = 0.3,
+    splitDistanceM = 1000,
+    pauseDetection = 'auto',
   } = options
 
+  for (const [name, value] of Object.entries({ elevationThresholdM, pauseThresholdMps })) {
+    if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid ${name}: expected a finite, non-negative number.`)
+  }
+  if (zoneModel == null || (zoneModel.type !== 'hrmax' && zoneModel.type !== 'reserve')) {
+    throw new Error('Invalid zoneModel: expected type "hrmax" or "reserve".')
+  }
+  if (!Number.isFinite(splitDistanceM) || splitDistanceM < 1) throw new Error('Invalid splitDistanceM: expected a finite number of at least 1 metre.')
+  if (pauseDetection !== 'auto' && pauseDetection !== 'speed') throw new Error('Invalid pauseDetection: expected auto or speed.')
   const zoneBoundaries = zoneModel.boundaries ?? DEFAULT_ZONE_BOUNDARIES
   validateZoneBoundaries(zoneBoundaries)
   validateHeartRateInputs(maxHR, zoneModel)
@@ -357,6 +558,16 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
     : (hr: number) => hr / maxHR
 
   const pts = activity.points
+  validatePoints(pts)
+
+  const { cumDist, source: distanceSource } = cumulativeDistanceSeries(pts)
+  const quality = assessQuality(activity, distanceSource)
+  const timer = timerRanges(activity)
+  quality.timerFallback = timer.fallback
+  if (timer.fallback === 'invalid') quality.warnings.push('invalid-timer-events')
+  const timerTime = timer.ranges == null ? null : timerDuration(pts, timer.ranges)
+  const useTimer = pauseDetection === 'auto' && timerTime != null
+  const movingTimeSource = useTimer ? 'timer' : distanceSource === 'unavailable' ? 'unavailable' : 'speed'
 
   // Elevation is resolved before the <2-point guard: the device totals are
   // activity-level scalars, independent of how many points were recorded, so
@@ -365,18 +576,27 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
   const { gainAtPoint, totalGainM: hystGainM, totalLossM: hystLossM } =
     elevationHysteresis(pts, elevationThresholdM)
   const hasAltitudeStream = pts.some(p => p.elevation != null)
-  const { gainM: elevationGainM, lossM: elevationLossM, source: elevationSource } =
+  const { gainM: elevationGainM, lossM: elevationLossM, source: elevationSource,
+    gainSource: elevationGainSource, lossSource: elevationLossSource } =
     resolveElevation(activity, hystGainM, hystLossM, hasAltitudeStream)
+
+  const elevationFallback = (raw: number | undefined, source: 'device' | 'computed'): DataQuality['elevationGainFallback'] => {
+    if (source === 'device') return null
+    if (raw == null) return 'missing'
+    return raw === 0 ? 'contradictory-zero' : 'invalid'
+  }
+  quality.elevationGainFallback = elevationFallback(activity.deviceElevationGainM, elevationGainSource)
+  quality.elevationLossFallback = elevationFallback(activity.deviceElevationLossM, elevationLossSource)
 
   if (pts.length < 2) {
     return {
-      distanceM: 0, distanceSource: 'computed',
+      distanceM: 0, distanceSource, quality, splitDistanceM, timerTimeSec: timerTime, movingTimeSource,
       deviceDistanceM: resolveDeviceDistanceM(activity.deviceDistanceM, 0),
       elapsedTimeSec: 0, movingTimeSec: 0,
       avgPaceSecPerKm: 0, bestKmPaceSecPerKm: null,
       elevationGainM: Math.round(elevationGainM), elevationLossM: Math.round(elevationLossM),
-      elevationSource,
-      avgHeartRate: null, maxHeartRate: null, hrZones: null,
+      elevationSource, elevationGainSource, elevationLossSource,
+      avgHeartRate: null, maxHeartRate: pts[0]?.heartRate ?? null, hrZones: null,
       avgCadence: null, splits: [],
     }
   }
@@ -390,10 +610,8 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
   // they can never disagree (the elevation chart's x-axis reads it too, via
   // stats.distanceSource). Per-segment distance is a difference of adjacent
   // entries, never re-summed a second way.
-  const { cumDist, source: distanceSource } = cumulativeDistanceSeries(pts)
-
-  // Elapsed-time companion series, index 0 = 0, filled in the loop below.
-  const cumTime: number[] = [0]
+  // Elapsed-time companion series, with interior timestamp gaps interpolated.
+  const cumTime = cumulativeTimes(pts, cumDist)
 
   // HR
   const hrValues = pts.map(p => p.heartRate).filter((h): h is number => h != null)
@@ -406,32 +624,23 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
   // for exactly the corrupt segments (§1.5.2).
   const noTimestampsAtAll = pts.every(p => p.timestamp == null)
   const hrZoneSegments: { heartRate?: number; weightSec: number }[] = []
-
-  // Cadence
-  const cadValues = pts.map(p => p.cadence).filter((c): c is number => c != null)
-  const hasCadence = cadValues.length > 0
+  const sensorWeights = new Array<number>(pts.length).fill(0)
 
   for (let i = 1; i < pts.length; i++) {
     const prev = pts[i - 1]
     const curr = pts[i]
+    if (curr.segmentStart) continue
 
     // Segment distance is a difference of the shared cumulative series, so it
     // reflects whichever source won — never a second, independent haversine.
     const segDist = cumDist[i] - cumDist[i - 1]
 
-    // Time delta
-    let segTimeSec = 1 // default 1s between points if no timestamps
-    if (prev.timestamp && curr.timestamp) {
-      segTimeSec = (curr.timestamp.getTime() - prev.timestamp.getTime()) / 1000
-    }
-    if (segTimeSec <= 0) segTimeSec = 1
+    const segTimeSec = cumTime[i] - cumTime[i - 1]
 
-    const speedMps = segDist / segTimeSec
+    const speedMps = segTimeSec > 0 ? segDist / segTimeSec : 0
     const isMoving = speedMps > pauseThresholdMps
 
     if (isMoving) movingTimeSec += segTimeSec
-
-    cumTime.push(cumTime[i - 1] + segTimeSec)
 
     // HR zone weight for this segment (attributed to curr, the ending sample)
     let zoneWeightSec: number
@@ -443,40 +652,41 @@ export function analyze(activity: Activity, arg2?: AnalyzeOptions | number, arg3
       const rawDt = (curr.timestamp.getTime() - prev.timestamp.getTime()) / 1000
       zoneWeightSec = rawDt > 0 ? rawDt : 0
     }
+    sensorWeights[i] = zoneWeightSec
     hrZoneSegments.push({ heartRate: curr.heartRate, weightSec: zoneWeightSec })
   }
 
   const distanceM = cumDist[cumDist.length - 1]
-  const splits = buildSplits(pts, cumDist, cumTime, gainAtPoint)
+  const splits = buildSplits(pts, cumDist, cumTime, gainAtPoint, sensorWeights, splitDistanceM)
 
-  const bestKmPace = computeBestKmPaceSecPerKm(cumDist, cumTime)
+  const bestKmPace = quality.unknownDistanceIntervals > 0 ? null : bestContinuousKm(pts, cumDist, cumTime)
 
-  const elapsedTimeSec =
-    pts[0].timestamp && pts[pts.length - 1].timestamp
-      ? (pts[pts.length - 1].timestamp!.getTime() - pts[0].timestamp!.getTime()) / 1000
-      : movingTimeSec
+  const elapsedTimeSec = pts[0].timestamp && pts[pts.length - 1].timestamp
+    ? (pts[pts.length - 1].timestamp!.getTime() - pts[0].timestamp.getTime()) / 1000
+    : cumTime[cumTime.length - 1]
+
+  if (useTimer) movingTimeSec = timerTime!
 
   const avgPaceSecPerKm = distanceM > 0 ? (movingTimeSec / (distanceM / 1000)) : 0
 
   return {
     distanceM: Math.round(distanceM),
-    distanceSource,
-    deviceDistanceM: resolveDeviceDistanceM(activity.deviceDistanceM, distanceM),
+    distanceSource, quality, splitDistanceM, timerTimeSec: timerTime == null ? null : Math.round(timerTime), movingTimeSource,
+    deviceDistanceM: resolveDeviceDistanceM(activity.deviceDistanceM, Math.round(distanceM)),
     elapsedTimeSec: Math.round(elapsedTimeSec),
     movingTimeSec: Math.round(movingTimeSec),
     avgPaceSecPerKm: Math.round(avgPaceSecPerKm),
     bestKmPaceSecPerKm: bestKmPace != null ? Math.round(bestKmPace) : null,
     elevationGainM: Math.round(elevationGainM),
     elevationLossM: Math.round(elevationLossM),
-    elevationSource,
-    avgHeartRate: hasHR ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : null,
+    elevationSource, elevationGainSource, elevationLossSource,
+    avgHeartRate: weightedAverage(pts, sensorWeights, 'heartRate'),
     // reduce, not Math.max(...hrValues): spreading a long HR array (a multi-hour
     // activity at 1 Hz is tens of thousands of samples, some FIT files far more)
-    // into a call blows the argument-count/stack limit. avgHeartRate above uses
-    // the same single-pass style.
+    // into a call blows the argument-count/stack limit.
     maxHeartRate: hasHR ? hrValues.reduce((m, h) => (h > m ? h : m), -Infinity) : null,
     hrZones: hasHR ? hrZones(hrZoneSegments, pctOfMax, zoneBoundaries) : null,
-    avgCadence: hasCadence ? Math.round(cadValues.reduce((a, b) => a + b, 0) / cadValues.length) : null,
+    avgCadence: weightedAverage(pts, sensorWeights, 'cadence'),
     splits,
   }
 }

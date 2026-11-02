@@ -25,14 +25,11 @@ describe('parse() input classification', () => {
     }
   })
 
-  test('explicit { format: "gpx" } skips path/content sniffing for a string with no leading "<"', () => {
+  test('a format hint does not accept garbage before the XML root', () => {
     const gpx =
       'garbage-prefix<gpx><trk><name>X</name><trkseg>' +
       '<trkpt lat="52.1" lon="4.9"></trkpt></trkseg></trk></gpx>'
-    const activity = parse(gpx, { format: 'gpx' })
-    expect(activity.format).toBe('gpx')
-    expect(activity.name).toBe('X')
-    expect(activity.points.length).toBe(1)
+    expect(() => parse(gpx, { format: 'gpx' })).toThrow()
   })
 })
 

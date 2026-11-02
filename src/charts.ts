@@ -8,25 +8,75 @@
  *
  * Usage:
  *   import { Chart } from 'chart.js/auto'
- *   import { paceChartConfig } from '@alosha/stride'
+ *   import { paceChartConfig } from '@alosha/stride/charts'
  *   new Chart(canvas, paceChartConfig(activity, stats))
  */
 
 import type { Activity, ActivityStats, ChartOptions, Split } from './types.js'
 import type { ChartConfiguration } from 'chart.js'
 import { formatPace, formatDuration } from './analyzer.js'
-import { cumulativeDistances } from './geo.js'
+import { cumulativeDistances, cumulativeDistanceSeries } from './geo.js'
 
-// Indices for downsampling a point series, always including the final point.
-// A plain `for (i = 0; i < n; i += step)` loop stops at the last multiple of
-// `step`, silently truncating up to `step - 1` points from the end: a 4416-point
-// run at step 22 ends its x-axis at 12.3 km for a 12.4 km activity. The chart
-// must end where the run ended.
-function sampleIndices(length: number, step: number): number[] {
-  const idx: number[] = []
-  for (let i = 0; i < length; i += step) idx.push(i)
-  if (length > 0 && idx[idx.length - 1] !== length - 1) idx.push(length - 1)
-  return idx
+interface ProfileReading { x: number; y: number; span: number }
+
+// Retain both endpoints and each bucket's minimum/maximum in original order.
+// Uniform sampling can erase a short effort or summit completely. Span IDs
+// survive selection, so omitted readings can never reconnect separate runs.
+function sampleProfile(readings: ProfileReading[]): ProfileReading[] {
+  const limit = 200
+  if (readings.length <= limit) return readings
+  const selected = new Set<number>([0, readings.length - 1])
+  const buckets = (limit - 2) / 2
+  const interior = readings.length - 2
+  for (let bucket = 0; bucket < buckets; bucket++) {
+    const start = 1 + Math.floor(bucket * interior / buckets)
+    const end = 1 + Math.floor((bucket + 1) * interior / buckets)
+    let min = start
+    let max = start
+    for (let i = start + 1; i < end; i++) {
+      if (readings[i].y < readings[min].y) min = i
+      if (readings[i].y > readings[max].y) max = i
+    }
+    selected.add(min)
+    selected.add(max)
+  }
+  return [...selected].sort((a, b) => a - b).map(i => readings[i])
+}
+
+function profileData(
+  activity: Activity, stats: ActivityStats, field: 'elevation' | 'heartRate',
+  units: 'metric' | 'imperial',
+): { x: number; y: number }[][] {
+  const points = activity.points
+  // Preserve the full route and its origin before selecting sensor readings.
+  const cumDist = stats.distanceSource === 'device'
+    ? cumulativeDistanceSeries(points).cumDist
+    : cumulativeDistances(points)
+  const origin = points.find(p => p.timestamp != null)?.timestamp?.getTime() ?? 0
+  const useTime = stats.distanceSource === 'unavailable'
+  const hasTime = points.some(p => p.timestamp != null)
+  let span = 0
+  const readings: ProfileReading[] = []
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]
+    if (p.segmentStart) span++
+    // Missing values (including time needed by a time-axis profile) end a
+    // sensor run. Filtering them out without a marker would bridge the gap.
+    if (p[field] == null || (useTime && hasTime && p.timestamp == null)) { span++; continue }
+    readings.push({
+      x: useTime ? (hasTime ? (p.timestamp!.getTime() - origin) / 60000 : i) : cumDist[i] / (units === 'imperial' ? 1609.344 : 1000),
+      y: p[field]! * (field === 'elevation' && units === 'imperial' ? 3.28084 : 1),
+      span,
+    })
+  }
+  const series: { x: number; y: number }[][] = [[]]
+  let previousSpan: number | undefined
+  for (const reading of sampleProfile(readings)) {
+    if (previousSpan != null && reading.span !== previousSpan) series.push([])
+    series[series.length - 1].push({ x: reading.x, y: reading.y })
+    previousSpan = reading.span
+  }
+  return series
 }
 
 const GREEN = 'rgba(34,197,94,1)'
@@ -47,11 +97,12 @@ function fade(rgba: string, alpha: number): string {
 // A partial split's `distanceM` differs from 1000 (see types.ts) — label it
 // distinctly so a chart never presents it as if a full kilometre were run.
 function splitLabel(split: Split, units: 'metric' | 'imperial'): string {
-  if (split.distanceM === 1000) return `km ${split.km}`
+  const label = (split.targetDistanceM ?? 1000) === 1000 ? `km ${split.km}` : (split.targetDistanceM === 1609.344 ? `mi ${split.index}` : `Split ${split.index}`)
+  if (!(split.isPartial ?? split.distanceM !== 1000)) return label
   const partialDist = units === 'imperial'
     ? `${(split.distanceM / 1609.34).toFixed(2)} mi`
     : `${(split.distanceM / 1000).toFixed(2)} km`
-  return `km ${split.km} (${partialDist})`
+  return `${label} (${partialDist})`
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +135,7 @@ export function paceChartConfig(
       responsive: true,
       plugins: {
         legend: { display: false },
-        title: { display: true, text: 'Pace per km' },
+        title: { display: true, text: (stats.splitDistanceM ?? 1000) === 1000 ? 'Pace per km' : 'Pace per split' },
         tooltip: {
           callbacks: {
             label: (ctx) => ctx.parsed.y != null ? formatPace(ctx.parsed.y * 60, units) : '',
@@ -114,48 +165,20 @@ export function elevationChartConfig(
 ): ChartConfiguration {
   const units = opts.units ?? 'metric'
 
-  // Downsample to max 200 points for performance
-  const pts = activity.points.filter(p => p.elevation != null)
-  const step = Math.max(1, Math.floor(pts.length / 200))
-
-  // Cumulative distance over every (elevation-bearing) point (see src/geo.ts)
-  // — sampling below indexes into this, rather than summing chords of the
-  // decimated points, which would undercount the true path length. The axis
-  // must follow whichever source the analyzer chose (stats.distanceSource),
-  // so this chart's distance never disagrees with stats.distanceM: when that
-  // was the device stream, re-base its cumulative `distanceM` to the first
-  // point; otherwise fall back to the same haversine maths as analyze().
-  const useDevice = stats.distanceSource === 'device' && pts.every(p => p.distanceM != null)
-  const cumDist = useDevice
-    ? pts.map(p => p.distanceM! - pts[0].distanceM!)
-    : cumulativeDistances(pts)
-
-  const labels: string[] = []
-  const elevData: number[] = []
-  for (const i of sampleIndices(pts.length, step)) {
-    const distKm = cumDist[i] / 1000
-    labels.push(units === 'imperial'
-      ? `${(distKm * 0.621371).toFixed(1)} mi`
-      : `${distKm.toFixed(1)} km`)
-
-    const elevation = pts[i].elevation!
-    elevData.push(units === 'imperial' ? +(elevation * 3.28084).toFixed(1) : +elevation.toFixed(1))
-  }
-
   return {
     type: 'line',
     data: {
-      labels,
-      datasets: [{
+      datasets: profileData(activity, stats, 'elevation', units).map(data => ({
         label: `Elevation (${units === 'imperial' ? 'ft' : 'm'})`,
-        data: elevData,
+        data,
+        spanGaps: false,
         borderColor: BLUE,
         backgroundColor: BLUE_FILL,
         fill: true,
         tension: 0.2,
-        pointRadius: 0,
+        pointRadius: data.length === 1 ? 2 : 0,
         borderWidth: 1.5,
-      }],
+      })),
     },
     options: {
       responsive: true,
@@ -164,7 +187,11 @@ export function elevationChartConfig(
         title: { display: true, text: 'Elevation profile' },
       },
       scales: {
-        x: { ticks: { maxTicksLimit: 8 } },
+        x: {
+          type: 'linear',
+          title: { display: true, text: stats.distanceSource === 'unavailable' ? (activity.points.some(p => p.timestamp != null) ? 'Elapsed time (min)' : 'Sample index') : units === 'imperial' ? 'Distance (mi)' : 'Distance (km)' },
+          ticks: { maxTicksLimit: 8 },
+        },
       },
     },
   }
@@ -181,46 +208,20 @@ export function heartRateChartConfig(
 ): ChartConfiguration {
   const units = opts.units ?? 'metric'
 
-  // Downsample to max 200 points for performance
-  const pts = activity.points.filter(p => p.heartRate != null)
-  const step = Math.max(1, Math.floor(pts.length / 200))
-
-  // x-axis is distance, not sample index. Smart-recording watches sample
-  // hard efforts densely and steady running sparsely, so a sample-index
-  // axis stretches the hard sections and compresses the easy ones —
-  // distorting exactly the feature this chart exists to show. Same source
-  // discipline as the elevation chart: follow whichever series the analyzer
-  // chose (stats.distanceSource) so the axis never disagrees with
-  // stats.distanceM.
-  const useDevice = stats.distanceSource === 'device' && pts.every(p => p.distanceM != null)
-  const cumDist = useDevice
-    ? pts.map(p => p.distanceM! - pts[0].distanceM!)
-    : cumulativeDistances(pts)
-
-  const labels: string[] = []
-  const hrData: number[] = []
-  for (const i of sampleIndices(pts.length, step)) {
-    const distKm = cumDist[i] / 1000
-    labels.push(units === 'imperial'
-      ? `${(distKm * 0.621371).toFixed(1)} mi`
-      : `${distKm.toFixed(1)} km`)
-    hrData.push(pts[i].heartRate!)
-  }
-
   return {
     type: 'line',
     data: {
-      labels,
-      datasets: [{
+      datasets: profileData(activity, stats, 'heartRate', units).map(data => ({
         label: 'Heart rate (bpm)',
-        data: hrData,
+        data,
+        spanGaps: false,
         borderColor: RED,
         backgroundColor: 'rgba(239,68,68,0.1)',
         fill: true,
         tension: 0.3,
-        pointRadius: 0,
+        pointRadius: data.length === 1 ? 2 : 0,
         borderWidth: 1.5,
-      }],
+      })),
     },
     options: {
       responsive: true,
@@ -229,7 +230,11 @@ export function heartRateChartConfig(
         title: { display: true, text: 'Heart rate' },
       },
       scales: {
-        x: { ticks: { maxTicksLimit: 8 } },
+        x: {
+          type: 'linear',
+          title: { display: true, text: stats.distanceSource === 'unavailable' ? (activity.points.some(p => p.timestamp != null) ? 'Elapsed time (min)' : 'Sample index') : units === 'imperial' ? 'Distance (mi)' : 'Distance (km)' },
+          ticks: { maxTicksLimit: 8 },
+        },
       },
     },
   }
@@ -307,7 +312,7 @@ export function splitsChartConfig(
         // others" visually, on top of its distinct label.
         backgroundColor: splits.map(s => {
           const base = s.paceSecPerKm <= avgPace ? GREEN : ORANGE
-          return s.distanceM === 1000 ? base : fade(base, 0.5)
+          return (s.isPartial ?? s.distanceM !== 1000) ? fade(base, 0.5) : base
         }),
         borderRadius: 4,
       }],

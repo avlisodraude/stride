@@ -1,3 +1,39 @@
+# Migrating from 2.x to 3.0.0
+
+Version 3.0.0 introduces the following public type and metric changes.
+
+- XML timestamp text now requires the supported ISO dateTime form with a
+  four-digit positive year. Invalid calendar/clock/offset values and informal
+  date strings are discarded and counted; existing timing interpolation and
+  endpoint checks then apply. Explicit zones are recommended for portability.
+- Maximum HR now includes a lone valid reading, while duration-weighted averages
+  remain null without covered intervals. CLI text shows that maximum even when
+  average HR is unavailable, and labels missing distance/time/pace `Unavailable`.
+  Machine-readable JSON retains numeric placeholders plus quality/source fields.
+- `TrackPoint.lat` and `lon` are now optional together. FIT/TCX indoor records
+  are retained. Check both coordinates before sending points to a map.
+- Handle `distanceSource: 'unavailable'` and `elevationSource: 'mixed'` in
+  exhaustive switches. Consult `quality` before presenting zero/partial distance
+  as measured, and use the per-total elevation source fields.
+- Auto pause detection prefers valid FIT start/stop timer events, changing
+  `movingTimeSec` and average pace for files that carry them. Timer duration
+  can include standing. Pass `{ pauseDetection: 'speed' }` for the previous
+  threshold policy. `timerTimeSec` remains separate; sensor weighting, best-km
+  and split pace continue to use recorded elapsed time, including pauses.
+- `Split.km` remains an ordinal alias. New consumers should use `index`,
+  `targetDistanceM` and `isPartial`. Default boundaries remain 1000 m; full
+  mile splits can have different integer metre distances due to rounding.
+- Constructed `ActivityStats`/`Split` objects need the new required provenance,
+  quality and split fields. Prefer `analyze()` rather than manually assembling
+  stats. The deprecated positional `analyze()` overload is still supported.
+- Each TCX Track element and each gap caused by a discarded GPX fix starts
+  a separate recorded span. Distance and sensor/time weighting no longer join
+  these spans; wall-clock elapsed time and lap-level totals remain available.
+  Profile datasets also split at missing sensor readings, and bounded sampling
+  now preserves bucket extrema. Iterate all datasets when customizing charts.
+- Multi-activity TCX now rejects instead of combining unrelated activities.
+  Parse separate exports. Multiple laps in one activity remain supported.
+
 # Migrating from 1.x to 2.x
 
 Six things changed. Two are **silent** — your code keeps running and returns
@@ -133,7 +169,7 @@ actually worked there either — 2.x just says so.
 ## 6. `analyze()` takes an options object (deprecated, not yet removed)
 
 ```ts
-// 1.x (still works in 2.x, @deprecated, removed in 3.0.0)
+// 1.x (still works in 2.x, @deprecated; retained for compatibility)
 const stats = analyze(activity, 185, 2)
 
 // 2.x

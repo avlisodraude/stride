@@ -5,6 +5,10 @@
 
 const R = 6_371_000 // Earth radius in metres (docs/metrics-spec.md Appendix A)
 
+export function hasPosition<T extends { lat?: number; lon?: number }>(p: T): p is T & { lat: number; lon: number } {
+  return p.lat != null && p.lon != null
+}
+
 export function haversine(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const toRad = (d: number) => (d * Math.PI) / 180
   const dLat = toRad(b.lat - a.lat)
@@ -14,7 +18,8 @@ export function haversine(a: { lat: number; lon: number }, b: { lat: number; lon
   const x =
     sinDLat * sinDLat +
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinDLon * sinDLon
-  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
+  const clamped = Math.max(0, Math.min(1, x))
+  return 2 * R * Math.atan2(Math.sqrt(clamped), Math.sqrt(1 - clamped))
 }
 
 /**
@@ -26,10 +31,12 @@ export function haversine(a: { lat: number; lon: number }, b: { lat: number; lon
  * measures the chords of the decimated track, not the track, and undercounts
  * the true path length.
  */
-export function cumulativeDistances(points: { lat: number; lon: number }[]): number[] {
+export function cumulativeDistances(points: { lat?: number; lon?: number; segmentStart?: boolean }[]): number[] {
   const cumDist = new Array(points.length).fill(0)
   for (let i = 1; i < points.length; i++) {
-    cumDist[i] = cumDist[i - 1] + haversine(points[i - 1], points[i])
+    const a = points[i - 1]
+    const b = points[i]
+    cumDist[i] = cumDist[i - 1] + (!b.segmentStart && hasPosition(a) && hasPosition(b) ? haversine(a, b) : 0)
   }
   return cumDist
 }
@@ -37,24 +44,30 @@ export function cumulativeDistances(points: { lat: number; lon: number }[]): num
 /**
  * True when the device's own cumulative distance stream is usable for the
  * whole track: every point carries a finite `distanceM`, the series is
- * non-decreasing (a pause repeats a value — that is fine), and it is not all
- * zeros. A field that appears on only some points, goes backwards, or is
+ * non-decreasing inside each continuous span (a pause repeats a value), and
+ * it is not all zeros. Resets at marked span starts are allowed. A field
+ * that appears on only some points, goes backwards within a span, or is
  * uniformly zero is treated as absent — half a device series is worse than
  * none, because splicing it onto haversine would put a discontinuity in the
  * cumulative distance.
  */
-export function hasUsableDeviceDistance(points: { distanceM?: number }[]): boolean {
-  if (points.length === 0) return false
+export function hasUsableDeviceDistance(points: { distanceM?: number; segmentStart?: boolean }[]): boolean {
+  return deviceDistanceFallback(points) === null
+}
+
+export function deviceDistanceFallback(points: { distanceM?: number; segmentStart?: boolean }[]): import('./types.js').DataQuality['deviceDistanceFallback'] {
+  if (points.length === 0 || points.every(p => p.distanceM == null)) return 'missing'
   let prev = -Infinity
   let max = 0
   for (const p of points) {
     const d = p.distanceM
-    if (d == null || !Number.isFinite(d)) return false
-    if (d < prev) return false            // non-monotonic → treat as absent
+    if (d == null) return 'incomplete'
+    if (!Number.isFinite(d) || d < 0) return 'invalid'
+    if (!p.segmentStart && d < prev) return 'decreasing'
     prev = d
     if (d > max) max = d
   }
-  return max > 0                          // all-zero → treat as absent
+  return max > 0 ? null : 'all-zero'
 }
 
 /**
@@ -63,18 +76,38 @@ export function hasUsableDeviceDistance(points: { distanceM?: number }[]): boole
  * `distanceM` stream when {@link hasUsableDeviceDistance} holds, otherwise
  * summed haversine ({@link cumulativeDistances}). Never mix the two per
  * segment. The device series is re-based to the first point so it shares
- * haversine's frame (distance from the first recorded point, not from the
- * device's own zero, which may sit before the first GPS fix).
+ * haversine's frame (progress within recorded spans, excluding edges across
+ * marked breaks and any device offset before a span's first GPS fix).
  *
  * This is the single series that must feed `distanceM`, `splits[]`,
  * `bestKmPaceSecPerKm` and the elevation chart's x-axis — compute it once.
  */
 export function cumulativeDistanceSeries(
-  points: { lat: number; lon: number; distanceM?: number }[]
-): { cumDist: number[]; source: 'device' | 'computed' } {
+  points: { lat?: number; lon?: number; distanceM?: number; segmentStart?: boolean }[]
+): { cumDist: number[]; source: 'device' | 'computed' | 'unavailable' } {
   if (hasUsableDeviceDistance(points)) {
     const base = points[0].distanceM!
-    return { cumDist: points.map(p => p.distanceM! - base), source: 'device' }
+    let gapDistance = 0
+    const cumDist = points.map((p, i) => {
+      if (i > 0 && p.segmentStart) gapDistance += p.distanceM! - points[i - 1].distanceM!
+      return p.distanceM! - base - gapDistance
+    })
+    return { cumDist, source: 'device' }
   }
-  return { cumDist: cumulativeDistances(points), source: 'computed' }
+  const hasGpsEdge = points.some((p, i) => i > 0 && !p.segmentStart && hasPosition(p) && hasPosition(points[i - 1]))
+  // Empty/single GPS tracks retain their historical computed source.
+  return { cumDist: cumulativeDistances(points), source: hasGpsEdge || points.length < 2 && points.every(hasPosition) ? 'computed' : 'unavailable' }
+}
+
+/** Inclusive index ranges for continuous recorded spans. */
+export function continuousRanges(points: { segmentStart?: boolean }[]): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = []
+  let start = 0
+  for (let i = 1; i <= points.length; i++) {
+    if (i === points.length || points[i].segmentStart) {
+      ranges.push({ start, end: i - 1 })
+      start = i
+    }
+  }
+  return ranges
 }

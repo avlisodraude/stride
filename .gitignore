@@ -3,6 +3,7 @@ dist/
 .env
 *.env.local
 coverage/
+test-results/
 
 # npm pack output
 *.tgz

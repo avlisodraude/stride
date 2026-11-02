@@ -1,21 +1,28 @@
 // ---------------------------------------------------------------------------
-// Raw GPS data
+// Raw activity readings
 // ---------------------------------------------------------------------------
 
 export interface TrackPoint {
-  lat: number
-  lon: number
+  /** Both coordinates are absent for indoor/GPS-less readings. */
+  lat?: number
+  lon?: number
   elevation?: number   // metres
   timestamp?: Date
   heartRate?: number   // bpm
   cadence?: number     // steps/min
+  /** First point of a new continuous span (GPX track/segment, TCX Track,
+   * or a gap caused by a discarded record).
+   * No distance, recorded-span duration, sensor weight or elevation change
+   * is inferred from the preceding point. Omit for continuous points. */
+  segmentStart?: boolean
   /**
    * Device-reported distance from the *activity start*, in metres —
    * **cumulative, not per-segment**. Present when the source file carries a
-   * distance stream (FIT `record.distance`/`enhancedDistance`, TCX
+   * distance stream (FIT `record.distance`, TCX
    * `<DistanceMeters>`); absent for GPX, which has no standard distance
    * element. The analyzer prefers this over summed haversine when the whole
-   * track has it and it is non-decreasing (see {@link ActivityStats.distanceSource}).
+   * track has it and it is non-decreasing within each continuous span
+   * (see {@link ActivityStats.distanceSource}). Resets at span starts are allowed.
    */
   distanceM?: number
 }
@@ -25,6 +32,11 @@ export interface TrackPoint {
 // ---------------------------------------------------------------------------
 
 export interface Activity {
+  /** Parser counts; no original values or location data are included. */
+  parseDiagnostics?: ParseDiagnostics
+  /** FIT timer transitions in file order. Unsupported transitions invalidate
+   * timer-based timing rather than silently changing the pause state. */
+  timerEvents?: TimerEvent[]
   name?: string
   type?: string        // e.g. "running", "cycling"
   startTime?: Date
@@ -37,10 +49,9 @@ export interface Activity {
    * laps), FIT `session.totalDistance` (summed across sessions). Undefined
    * for GPX, which has no such element.
    *
-   * May exceed `ActivityStats.distanceM`, which measures only from the
-   * first to the last *recorded* point: the difference is distance the
-   * device accumulated before its first usable position fix, or during
-   * segments with no position data. That gap is expected, not a bug — the
+   * May exceed `ActivityStats.distanceM`, which measures progress within
+   * recorded continuous spans. The difference includes distance outside
+   * the point stream or excluded span boundaries. That gap is expected, not a bug — the
    * two numbers answer different questions and are not required to agree.
    */
   deviceDistanceM?: number
@@ -87,11 +98,20 @@ export interface ActivityStats {
    * Which distance source produced `distanceM`, the cumulative series behind
    * `splits[]`/`bestKmPaceSecPerKm`, and the elevation chart's x-axis:
    * `'device'` when the file's own cumulative distance stream was usable
-   * (present on every point, non-decreasing, not all-zero), `'computed'` when
+   * (present on every point, non-decreasing within spans, not all-zero), `'computed'` when
    * it fell back to summing haversine distances between raw GPS points (GPX
    * always, and any track whose device stream was missing or unusable).
+   * 'unavailable' means no recorded edge has either usable GPS or device distance.
+   * Incomplete GPS coverage is counted in quality.unknownDistanceIntervals.
    */
-  distanceSource: 'device' | 'computed'
+  distanceSource: 'device' | 'computed' | 'unavailable'
+  /** Data coverage and the reasons for any estimation/fallback. */
+  quality: DataQuality
+  /** Configured split length (default 1000), independent of display units. */
+  splitDistanceM: number
+  /** Recorded FIT timer duration within continuous spans; null if unusable. */
+  timerTimeSec: number | null
+  movingTimeSource: 'speed' | 'timer' | 'unavailable'
   /**
    * The device's own total distance for the activity (see
    * {@link Activity.deviceDistanceM}), passed through unrounded and
@@ -111,17 +131,18 @@ export interface ActivityStats {
    * larger.
    */
   deviceDistanceM?: number
-  /** Total elapsed time in seconds */
+  /** Total wall-clock elapsed time in seconds, including gaps between spans. */
   elapsedTimeSec: number
-  /** Moving time (excludes pauses) in seconds */
+  /** Active FIT timer duration in auto mode when usable, otherwise speed-based
+   * moving time. Check movingTimeSource: a running timer can include standing. */
   movingTimeSec: number
   /** Average pace in seconds per kilometre */
   avgPaceSecPerKm: number
   /**
    * Fastest 1000m anywhere in the activity (elapsed time, seconds per km),
    * as a rolling window over the cumulative distance/time series —
-   * independent of splits[] and not quantised to km marks. Null if the
-   * activity covers less than 1000m.
+   * independent of splits[] and not quantised to km marks. Null if no single
+   * continuous recorded span covers 1000m. Never crosses segment breaks.
    */
   bestKmPaceSecPerKm: number | null
   /** Total elevation gain in metres */
@@ -129,11 +150,9 @@ export interface ActivityStats {
   /** Total elevation loss in metres */
   elevationLossM: number
   /**
-   * Which source produced `elevationGainM` / `elevationLossM`: `'device'`
-   * when the file carried a trusted device-computed total (FIT
-   * `session.total_ascent`/`total_descent`), `'computed'` when it fell back
-   * to the GPS-altitude hysteresis filter (GPX and TCX always, FIT when the
-   * field is absent or a zero that contradicts an obviously climbing track).
+   * Combined provenance: 'device' when both totals use the device, 'computed'
+   * when both use hysteresis, or 'mixed' when the sources differ. Consult the
+   * per-total source fields when interpreting either value independently.
    *
    * When this is `'device'`, `sum(splits[].elevationGainM)` does **not** equal
    * `elevationGainM`: the splits are still built from the per-point hysteresis
@@ -141,10 +160,17 @@ export interface ActivityStats {
    * total is the device's activity-level scalar. This inconsistency is
    * deliberate and documented — see `docs/metrics-spec.md` §5.6.
    */
-  elevationSource: 'device' | 'computed'
-  /** Average heart rate in bpm (null if no HR data) */
+  elevationSource: 'device' | 'computed' | 'mixed'
+  /** Provenance for elevationGainM; missing/invalid/contradictory device
+   * ascent totals fall back independently to hysteresis. */
+  elevationGainSource: 'device' | 'computed'
+  /** Provenance for elevationLossM, resolved independently of ascent. */
+  elevationLossSource: 'device' | 'computed'
+  /** Duration-weighted ending-sample HR in bpm; null with no HR-covered time.
+   * Missing original timestamps and span boundaries contribute no duration.
+   * If the whole activity is untimed, assume 1s per recorded interval. */
   avgHeartRate: number | null
-  /** Max heart rate in bpm (null if no HR data) */
+  /** Maximum recorded HR in bpm, including a lone sample; null only without HR data. */
   maxHeartRate: number | null
   /**
    * Heart rate zone breakdown in seconds (null if no HR data). Each sample's
@@ -153,27 +179,64 @@ export interface ActivityStats {
    * segment is assumed as a fallback (count-weighting).
    */
   hrZones: HeartRateZones | null
-  /** Average cadence in steps/min (null if no cadence data) */
+  /** Duration-weighted cadence in steps/min; same timing policy as avgHeartRate.
+   * Null with no cadence-covered time. */
   avgCadence: number | null
   /**
-   * Per-kilometre splits, including a trailing partial split for any
-   * remainder under 1000m. `sum(splits[i].distanceM) === distanceM`.
+   * Splits at splitDistanceM boundaries (default 1000m), with a trailing partial.
+   * Rounded cumulative boundaries preserve integer-metre totals for mile splits. Sub-metre tails that round to zero
+   * are folded into the final split. `sum(splits[i].distanceM) === distanceM`.
+   * Split timing excludes unrecorded gaps between continuous spans.
    */
   splits: Split[]
 }
 
 export interface Split {
+  /** One-based split ordinal. `km` is retained as a legacy alias. */
+  index: number
   km: number
-  /** Distance covered by this split, in metres. Full splits carry 1000; the
-   * final split of an activity may be a partial (< 1000) — identify it by
-   * `distanceM !== 1000`, not by a separate flag. `sum(splits.distanceM)`
-   * always equals the activity's total `distanceM`. */
+  targetDistanceM: number
+  isPartial: boolean
+  /** Integer metres, computed from rounded cumulative boundaries. Use
+   * isPartial to identify partial splits; fractional target lengths can
+   * produce different integer distances for otherwise full splits.
+   * sum(splits.distanceM) equals the activity total distanceM. */
   distanceM: number
   /** Pace normalised to seconds per kilometre, so a partial split's pace is
    * directly comparable to a full one's. */
   paceSecPerKm: number
   elevationGainM: number
+  /** Ending-sample HR weighted by duration overlapping this split. */
   avgHeartRate?: number
+}
+
+export interface ParseDiagnostics {
+  totalRecords: number
+  droppedRecords: number
+  invalidPositions: number
+  droppedReadings: number
+  droppedTimerEvents: number
+}
+
+export interface TimerEvent {
+  timestamp: Date
+  type: 'start' | 'stop' | 'unsupported'
+  group?: number
+}
+
+export interface DataQuality {
+  timingSource: 'recorded' | 'interpolated' | 'assumed' | 'unavailable'
+  missingTimestamps: number
+  missingPositions: number
+  /** Edges with neither a usable device stream nor two GPS positions. */
+  unknownDistanceIntervals: number
+  deviceDistanceFallback: 'missing' | 'incomplete' | 'invalid' | 'decreasing' | 'all-zero' | null
+  timerFallback: 'missing' | 'invalid' | 'untimed' | null
+  elevationGainFallback: 'missing' | 'invalid' | 'contradictory-zero' | null
+  elevationLossFallback: 'missing' | 'invalid' | 'contradictory-zero' | null
+  parseDiagnostics: ParseDiagnostics | null
+  /** Stable machine-readable codes, also shown in CLI output. */
+  warnings: string[]
 }
 
 // ---------------------------------------------------------------------------

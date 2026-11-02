@@ -16,8 +16,8 @@
  * figure, and the per-split gains (still hysteresis-derived) will not sum to it.
  *
  * Single session on purpose: the multisport (multi-session) summing path in
- * parseFit is NOT exercised by this fixture — it mirrors the already-covered
- * session.totalDistance sum.
+ * parseFit is exercised separately by multi-session.fit, generated with
+ * `npm run sample:multisession`.
  */
 import { Encoder, Profile } from '@garmin/fitsdk'
 import fs from 'fs'

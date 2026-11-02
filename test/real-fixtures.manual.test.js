@@ -9,7 +9,7 @@
  * *content*; it asserts only the invariants that must hold for ANY valid
  * activity, so any .fit/.gpx/.tcx dropped into test/fixtures/real/ is
  * picked up automatically. See test/fixtures/real/README.md for how to add
- * files. The suite skips itself when the directory is empty.
+ * files. The opt-in suite fails when the directory is empty.
  */
 import { fileURLToPath } from 'node:url'
 import { dirname, join, extname } from 'node:path'
@@ -40,22 +40,26 @@ if (files.length === 0) {
 }
 
 describe('real-device exports — universal invariants', () => {
-  test.each(files)('%s parses and analyzes cleanly', (file) => {
+  test.each(files.map((file, index) => [`${extname(file).slice(1).toUpperCase()} sample ${index + 1}`, file]))('%s parses and analyzes cleanly', (_label, file) => {
     const activity = parse(join(realDir, file))
 
     // --- parse-level invariants -----------------------------------------
     expect(['gpx', 'tcx', 'fit']).toContain(activity.format)
     expect(Array.isArray(activity.points)).toBe(true)
     for (const p of activity.points) {
+      if (p.lat != null || p.lon != null) {
       expect(Number.isFinite(p.lat)).toBe(true)
       expect(Number.isFinite(p.lon)).toBe(true)
       expect(Math.abs(p.lat)).toBeLessThanOrEqual(90)
       expect(Math.abs(p.lon)).toBeLessThanOrEqual(180)
+      }
       // Optional fields are either absent or finite — never NaN, never an
       // Invalid Date (the parser must drop malformed values at the boundary).
       if (p.elevation != null) expect(Number.isFinite(p.elevation)).toBe(true)
       if (p.heartRate != null) expect(Number.isFinite(p.heartRate)).toBe(true)
       if (p.cadence != null) expect(Number.isFinite(p.cadence)).toBe(true)
+      if (p.heartRate != null) expect(p.heartRate).toBeGreaterThan(0)
+      if (p.cadence != null) expect(p.cadence).toBeGreaterThanOrEqual(0)
       if (p.distanceM != null) expect(Number.isFinite(p.distanceM)).toBe(true)
       if (p.timestamp != null) expect(Number.isNaN(p.timestamp.getTime())).toBe(false)
     }
@@ -73,8 +77,10 @@ describe('real-device exports — universal invariants', () => {
       if (stats[key] != null) expect(Number.isFinite(stats[key])).toBe(true)
     }
 
-    expect(['device', 'computed']).toContain(stats.distanceSource)
-    expect(['device', 'computed']).toContain(stats.elevationSource)
+    expect(['device', 'computed', 'unavailable']).toContain(stats.distanceSource)
+    expect(['device', 'computed', 'mixed']).toContain(stats.elevationSource)
+    expect(['device', 'computed']).toContain(stats.elevationGainSource)
+    expect(['device', 'computed']).toContain(stats.elevationLossSource)
 
     // Documented guarantees (types.ts):
     // deviceDistanceM, when present, is never smaller than distanceM.
@@ -85,6 +91,7 @@ describe('real-device exports — universal invariants', () => {
     expect(stats.movingTimeSec).toBeLessThanOrEqual(stats.elapsedTimeSec + 1)
     // sum(splits[].distanceM) === distanceM, exactly.
     const splitSum = stats.splits.reduce((a, s) => a + s.distanceM, 0)
+    expect(stats.splits.every(s => s.distanceM > 0)).toBe(true)
     expect(splitSum).toBe(stats.distanceM)
     // Every full split is exactly 1000m; only the last may be partial.
     stats.splits.slice(0, -1).forEach(s => expect(s.distanceM).toBe(1000))

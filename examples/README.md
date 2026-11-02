@@ -29,6 +29,13 @@ node 01-parsing.mjs            # …or any other example
 | [`06-charts.mjs`](./06-charts.mjs) | The `@alosha/stride/charts` entry point — configs build without `chart.js` installed; you need it (`npm install chart.js`) only to render |
 | [`07-negative-split.mjs`](./07-negative-split.mjs) | Recipe: detect a negative split from `stats.splits`, handling the trailing partial split |
 
-Between them, every `AnalyzeOptions` field (`maxHR`, `zoneModel`,
-`elevationThresholdM`, `pauseThresholdMps`) and both parse entry points are
-exercised.
+These seven scripts cover parsing, HR models, speed thresholds, elevation,
+provenance, charts and split recipes. In 3.0.0, also use
+`analyze(activity, { splitDistanceM: 1609.344, pauseDetection: 'auto' })` for
+mile splits and FIT timer pauses. Inspect `stats.quality` and
+`stats.movingTimeSource`; unavailable distance is distinct from a recorded zero.
+Single HR samples retain maximum HR without duration-weighted averages.
+
+`npm run test:examples` runs all scripts from the repository root. Chart profiles
+contain multiple datasets at route/sensor gaps and sample bucket extrema within
+a 200-point total budget. Iterate all datasets when customizing them.
