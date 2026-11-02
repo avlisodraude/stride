@@ -1,0 +1,25 @@
+{
+  "repository": "https://github.com/aaron-schroeder/activereader",
+  "commit": "fafe078e5e9c9183784e1f27ff53e288bd0cc7e9",
+  "license": "MIT",
+  "licenseUrl": "https://raw.githubusercontent.com/aaron-schroeder/activereader/fafe078e5e9c9183784e1f27ff53e288bd0cc7e9/LICENSE",
+  "fixtures": [
+    {
+      "format": "gpx",
+      "file": "public-garmin.gpx",
+      "url": "https://raw.githubusercontent.com/aaron-schroeder/activereader/fafe078e5e9c9183784e1f27ff53e288bd0cc7e9/tests/testdata.gpx",
+      "sha256": "345e0c1a79f222bf214a6219f8eaceb9881ba6cf28863c1fae9f5fb86c7d2fb5",
+      "expectedPoints": 46,
+      "expectedSpans": 1
+    },
+    {
+      "format": "tcx",
+      "file": "public-garmin.tcx",
+      "url": "https://raw.githubusercontent.com/aaron-schroeder/activereader/fafe078e5e9c9183784e1f27ff53e288bd0cc7e9/tests/testdata.tcx",
+      "sha256": "7cf68523b7e20247ccf0859c77b6239a2e5ee60915c247a9facc10c3270b8196",
+      "expectedPoints": 49,
+      "expectedSpans": 4
+    }
+  ],
+  "licenseSha256": "98b8c6a1109c9ee502810c7061f25bb7dc287db8e65cd19479605c98b654183b"
+}

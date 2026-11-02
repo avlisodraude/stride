@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 const formats = ['fit', 'gpx', 'tcx']
 const files = readdirSync(new URL('../test/fixtures/real/', import.meta.url))
 const available = formats.filter(format => files.some(file => extname(file).toLowerCase() === `.${format}`))
-console.log(`Private export coverage: ${available.map(f => f.toUpperCase()).join(', ') || 'none'}`)
+console.log(`Real-export coverage: ${available.map(f => f.toUpperCase()).join(', ') || 'none'}`)
 if (process.argv.includes('--require-all-formats')) {
   const missing = formats.filter(format => !available.includes(format))
   if (missing.length) {

@@ -43,6 +43,9 @@ jobs:
       - name: Verify release
         run: npm run check
 
+      - name: Validate pinned Garmin exports
+        run: npm run fixtures:exports && npm run test:real
+
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

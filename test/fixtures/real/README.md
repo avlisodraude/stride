@@ -30,3 +30,12 @@ candidate, use `npm run test:real:all`: it fails unless genuine FIT, GPX and TCX
 exports are all present. A converted FIT-to-XML file is synthetic coverage,
 not a substitute for an independently exported GPX or TCX. Keep exports private;
 only synthetic fixtures should be committed or included in browser screenshots.
+
+
+Pinned public Garmin GPX/TCX samples can be fetched with
+`npm run fixtures:exports`. Checksums and source URLs are tracked in
+`test/public-exports.json`; downloads and their license remain ignored.
+See [validation evidence](../../../docs/export-validation.md) for provenance,
+coverage and limits. The all-format check now passes locally with these two
+samples plus the existing private FIT export. Public sample data is not a
+substitute for testing additional user/device exports.
